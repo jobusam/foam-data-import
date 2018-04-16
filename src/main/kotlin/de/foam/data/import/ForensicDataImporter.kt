@@ -16,10 +16,18 @@ fun main(args: Array<String>) {
     val filePath = Paths.get("/home/johannes/Studium/Masterthesis/work/localinstance/apps/data-minimal")
     println("Input data directory is $filePath")
 
+    val uploaded = uploadContentToHDFS(filePath, Paths.get("/"))
+    if (!uploaded) {
+        println("File upload of directory $filePath failed. Stop Forensic Data Import!")
+        return
+    }
+
     val rootDirectory = filePath.toFile()
     rootDirectory.walk(FileWalkDirection.TOP_DOWN)
             .map { getFileMetadata(it.toPath()) }
             .forEach { it?.let { println(it) } }
 
+    // TODO: Upload file metadata!
 }
+
 

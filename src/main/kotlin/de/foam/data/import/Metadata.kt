@@ -39,15 +39,11 @@ enum class FileType { DATA_FILE, DIRECTORY, SYMBOLIC_LINK, OTHER }
 fun getFileMetadata(filePath: Path): FileMetadata? {
     val posixAttributes = Files.getFileAttributeView(filePath, PosixFileAttributeView::class.java)?.readAttributes()
 
-    val fileType: FileType
-    if (Files.isSymbolicLink(filePath)) {
-        fileType = FileType.SYMBOLIC_LINK
-    } else if (Files.isRegularFile(filePath)) {
-        fileType = FileType.DATA_FILE
-    } else if (Files.isDirectory(filePath)) {
-        fileType = FileType.DIRECTORY
-    } else {
-        fileType = FileType.OTHER
+    val fileType = when {
+        Files.isSymbolicLink(filePath) -> FileType.SYMBOLIC_LINK
+        Files.isRegularFile(filePath) -> FileType.DATA_FILE
+        Files.isDirectory(filePath) -> FileType.DIRECTORY
+        else -> FileType.OTHER
     }
 
 
