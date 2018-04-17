@@ -14,7 +14,7 @@ import java.nio.file.attribute.PosixFileAttributeView
 /**
  * Contains all metadata of a file
  */
-data class FileMetadata(val filePath: Path, val fileType: FileType, val fileSize: Long?,
+data class FileMetadata(val relativeFilePath: String, val fileType: FileType, val fileSize: Long?,
                         val owner: String, val group: String, val permissions: String,
                         val timestamps: FileTimestamps
 )
@@ -36,7 +36,7 @@ enum class FileType { DATA_FILE, DIRECTORY, SYMBOLIC_LINK, OTHER }
 /**
  * Retrieve file metadata from given filePath like owner, group, permissions and timestamps
  */
-fun getFileMetadata(filePath: Path): FileMetadata? {
+fun getFileMetadata(filePath: Path, inputDirectory: Path): FileMetadata? {
     val posixAttributes = Files.getFileAttributeView(filePath, PosixFileAttributeView::class.java)?.readAttributes()
 
     val fileType = when {
@@ -52,7 +52,10 @@ fun getFileMetadata(filePath: Path): FileMetadata? {
         val timestamps = FileTimestamps(posixAttributes.lastModifiedTime().toString(),
                 lastAccessed = posixAttributes.lastAccessTime().toString(),
                 created = posixAttributes.creationTime().toString())
-        return FileMetadata(filePath, fileType, Files.size(filePath),
+        return FileMetadata(
+                inputDirectory.relativize(filePath).toString(),
+                fileType,
+                Files.size(filePath),
                 posixAttributes.owner().toString(),
                 posixAttributes.group().toString(),
                 posixAttributes.permissions().toString(),

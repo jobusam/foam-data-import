@@ -13,21 +13,22 @@ import java.nio.file.Paths
 fun main(args: Array<String>) {
     println("Starting Forensic Data Import...")
 
-    val filePath = Paths.get("/home/johannes/Studium/Masterthesis/work/localinstance/apps/data-minimal")
-    println("Input data directory is $filePath")
+    val inputDirectory = Paths.get("/home/johannes/Studium/Masterthesis/work/localinstance/apps/data-minimal")
+    val hdfsDirectoryPath = Paths.get("/data-minimal")
+    println("Input data directory is $inputDirectory")
 
-    val uploaded = uploadContentToHDFS(filePath, Paths.get("/"))
+    val uploaded = uploadContentToHDFS(inputDirectory, hdfsDirectoryPath)
     if (!uploaded) {
-        println("File upload of directory $filePath failed. Stop Forensic Data Import!")
+        println("File upload of directory $inputDirectory failed. Stop Forensic Data Import!")
         return
     }
 
-    val rootDirectory = filePath.toFile()
+    val rootDirectory = inputDirectory.toFile()
     rootDirectory.walk(FileWalkDirection.TOP_DOWN)
-            .map { getFileMetadata(it.toPath()) }
-            .forEach { it?.let { println(it) } }
-
-    // TODO: Upload file metadata!
+            .map { getFileMetadata(it.toPath(),inputDirectory) }
+            .also { it.let { println(it) } }
+            .onEach { it?.let { println(it) } }
+            .forEach { it?.let {uploadFileMetadata(it,hdfsDirectoryPath)} }
 }
 
 
