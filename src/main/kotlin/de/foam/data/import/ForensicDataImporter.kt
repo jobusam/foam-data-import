@@ -15,9 +15,11 @@ fun main(args: Array<String>) {
 
     val inputDirectory = Paths.get("/home/johannes/Studium/Masterthesis/work/localinstance/apps/data-minimal")
     val hdfsDirectoryPath = Paths.get("/data-minimal")
-    println("Input data directory is $inputDirectory")
+    println("Data from input data directory <$inputDirectory> will be uploaded to hdfs target directory <$hdfsDirectoryPath>")
 
-    val uploaded = uploadContentToHDFS(inputDirectory, hdfsDirectoryPath)
+    val hdfsImportCli = HdfsImportCli(hdfsTargetDirectory = hdfsDirectoryPath, inputDirectory = inputDirectory)
+
+    val uploaded = hdfsImportCli.uploadContentToHDFS()
     if (!uploaded) {
         println("File upload of directory $inputDirectory failed. Stop Forensic Data Import!")
         return
@@ -26,9 +28,12 @@ fun main(args: Array<String>) {
     val rootDirectory = inputDirectory.toFile()
     rootDirectory.walk(FileWalkDirection.TOP_DOWN)
             .map { getFileMetadata(it.toPath(),inputDirectory) }
-            .also { it.let { println(it) } }
             .onEach { it?.let { println(it) } }
-            .forEach { it?.let {uploadFileMetadata(it,hdfsDirectoryPath)} }
+            .forEach { it?.let {hdfsImportCli.uploadFileMetadata(it)} }
+
+    hdfsImportCli.waitForExecution()
+    println("File Metadata uploaded. Forensic Data Import finished.")
+
 }
 
 
