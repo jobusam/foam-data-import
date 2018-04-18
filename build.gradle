@@ -23,7 +23,15 @@ repositories {
 
 dependencies {
     compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
+
+    // For object serialization to JSON
     compile 'com.google.code.gson:gson:2.8.2'
+
+    // For Logging
+    compile 'io.github.microutils:kotlin-logging:1.4.9'
+    compile 'org.slf4j:slf4j-simple:1.7.25'
+
+    //For Testing
     testCompile group: 'junit', name: 'junit', version: '4.12'
 }
 

@@ -1,5 +1,6 @@
 package de.foam.data.import
 
+import mu.KotlinLogging
 import java.nio.file.Paths
 
 /**
@@ -10,18 +11,27 @@ import java.nio.file.Paths
  * Different approaches to preserve the file metadata will be implemented
  * and reviewed in this simple application.
  */
+
+/**
+ * Use kotlin-logging (Micro-Utils).
+ * Define log level with -Dorg.slf4j.simpleLogger.defaultLogLevel=DEBUG in vm options
+ */
+private val logger = KotlinLogging.logger {}
+
 fun main(args: Array<String>) {
-    println("Starting Forensic Data Import...")
+
+    logger.info { "Starting Forensic Data Import..." }
 
     val inputDirectory = Paths.get("/home/johannes/Studium/Masterthesis/work/localinstance/apps/data-minimal")
     val hdfsDirectoryPath = Paths.get("/data-minimal")
-    println("Data from input data directory <$inputDirectory> will be uploaded to hdfs target directory <$hdfsDirectoryPath>")
+    logger.info { "Data from input data directory <$inputDirectory>" +
+            " will be uploaded to hdfs target directory <$hdfsDirectoryPath>" }
 
     val hdfsImportCli = HdfsImportCli(hdfsTargetDirectory = hdfsDirectoryPath, inputDirectory = inputDirectory)
 
     val uploaded = hdfsImportCli.uploadContentToHDFS()
     if (!uploaded) {
-        println("File upload of directory $inputDirectory failed. Stop Forensic Data Import!")
+        logger.error { "File upload of directory $inputDirectory failed. Stop Forensic Data Import!" }
         return
     }
 
@@ -32,7 +42,7 @@ fun main(args: Array<String>) {
             .forEach { it?.let {hdfsImportCli.uploadFileMetadata(it)} }
 
     hdfsImportCli.waitForExecution()
-    println("File Metadata uploaded. Forensic Data Import finished.")
+    logger.info { "File Metadata uploaded. Forensic Data Import finished." }
 
 }
 

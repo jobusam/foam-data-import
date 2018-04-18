@@ -1,8 +1,10 @@
 package de.foam.data.import
 
 import com.google.gson.Gson
+import mu.KotlinLogging
 import java.nio.file.Path
 import java.util.*
+import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -38,6 +40,7 @@ class HdfsImportCli(
         val hdfsTargetDirectory: Path,
         val inputDirectory: Path) {
 
+    private val logger = KotlinLogging.logger {}
     private val service: ExecutorService? = Executors.newFixedThreadPool(10)
     private val futures = mutableListOf<Future<Int>>()
 
@@ -55,14 +58,14 @@ class HdfsImportCli(
     fun uploadContentToHDFS(): Boolean {
         val command = Arrays.asList("$hadoopHomeBin/hdfs", "dfs", "-put", inputDirectory.toAbsolutePath().toString(), hdfsTargetDirectory.toString())
         val processBuilder = ProcessBuilder(command)
-        println("Execute command ${processBuilder.command()}")
+        logger.debug { "Execute command ${processBuilder.command()}" }
         val result = processBuilder.start().waitFor()
 
         if (0 == result) {
-            println("Command successfully executed!")
+            logger.debug { "Command $command successfully executed!" }
             return true
         }
-        println("Command execution failed!")
+        logger.error { "Command execution failed <$command>"}
         return false
     }
 
@@ -72,7 +75,7 @@ class HdfsImportCli(
 
     fun uploadFileMetadata(fileMetadata: FileMetadata) {
         val serializedMetadata = serializeMetadata(fileMetadata)
-        println("Serialized Metadata = $serializedMetadata")
+        logger.trace { "Serialized Metadata = $serializedMetadata"}
 
 
         val command = Arrays.asList("$hadoopHomeBin/hdfs", "dfs", "-setfattr",
@@ -80,12 +83,12 @@ class HdfsImportCli(
                 "-v", "\"$serializedMetadata\"",
                 "${hdfsTargetDirectory.resolve(fileMetadata.relativeFilePath)}")
         val processBuilder = ProcessBuilder(command)
-        println("Execute command ${processBuilder.command()}")
+        logger.debug { "Execute command ${processBuilder.command()}" }
 
         // Maybe the best result is to work with an Thread Pool. Because synchronous execution needs to much time
         // but unlimited asynchronous execution leads to exponential resource consumption for a short period of time!
-        service?.submit { processBuilder.start().waitFor() }?.let { futures.add(it as Future<Int>) }
-               ?: println("ERROR: Can't upload Metadata. Executor Service is not available!")
+        service?.submit( Callable<Int> {processBuilder.start().waitFor()} )?.let { futures.add(it) }
+               ?: logger.error { "ERROR: Can't upload Metadata. Executor Service is not available!" }
     }
 
 }
