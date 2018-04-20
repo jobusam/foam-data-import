@@ -33,17 +33,24 @@ import java.util.concurrent.Future
  *   the upload takes a while.
  * - Symbolic links on local file system will be resolved with "hdfs dfs -put" command.
  *   This leads to much more overhead on HDFS!
+ *   CAUTION: The "hdfs -put" command hangs up in endless loop in case a symbolic link file
+ *   refers to a non-existent file!
+ *   This is a huge drawback because operating systems like Linux images does contain a lot of symbolic links
+ *   that refer to files which are only existent during runtime (like special devices, etc.).
+ *
+ *
+ * Result:
+ * This variant needs a loot of time for upload and doesn't work correctly with symbolic links!
  *
  */
 class HdfsImportCli(
-        val hadoopHomeBin: String = "/home/johannes/Studium/Masterthesis/work/localinstance/hadoop-3.0.0/bin",
-        val hdfsTargetDirectory: Path,
-        val inputDirectory: Path) {
+        private val hadoopHome: Path?,
+        private val hdfsTargetDirectory: Path,
+        private val inputDirectory: Path) {
 
     private val logger = KotlinLogging.logger {}
     private val service: ExecutorService? = Executors.newFixedThreadPool(10)
     private val futures = mutableListOf<Future<Int>>()
-
 
     fun waitForExecution() {
         //Wait for every execution result
@@ -56,7 +63,8 @@ class HdfsImportCli(
      * The default HDFS configuration will be used to access the HDFS (see $HADOOP_HOME/etc/hadoop)
      */
     fun uploadContentToHDFS(): Boolean {
-        val command = Arrays.asList("$hadoopHomeBin/hdfs", "dfs", "-put", inputDirectory.toAbsolutePath().toString(), hdfsTargetDirectory.toString())
+        val hdfsCommand = hadoopHome?.resolve("bin/hdfs")?.toString() ?: "hdfs"
+        val command = Arrays.asList(hdfsCommand, "dfs", "-put", inputDirectory.toAbsolutePath().toString(), hdfsTargetDirectory.toString())
         val processBuilder = ProcessBuilder(command)
         logger.debug { "Execute command ${processBuilder.command()}" }
         val result = processBuilder.start().waitFor()
@@ -77,8 +85,8 @@ class HdfsImportCli(
         val serializedMetadata = serializeMetadata(fileMetadata)
         logger.trace { "Serialized Metadata = $serializedMetadata"}
 
-
-        val command = Arrays.asList("$hadoopHomeBin/hdfs", "dfs", "-setfattr",
+        val hdfsCommand = hadoopHome?.resolve("bin/hdfs")?.toString() ?: "hdfs"
+        val command = Arrays.asList(hdfsCommand, "dfs", "-setfattr",
                 "-n", "user.originalMetadata",
                 "-v", "\"$serializedMetadata\"",
                 "${hdfsTargetDirectory.resolve(fileMetadata.relativeFilePath)}")
