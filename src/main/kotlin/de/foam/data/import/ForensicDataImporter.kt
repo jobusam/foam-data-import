@@ -1,6 +1,7 @@
 package de.foam.data.import
 
 import mu.KotlinLogging
+import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
@@ -15,16 +16,64 @@ import java.nio.file.Paths
 
 /**
  * Use kotlin-logging (Micro-Utils).
- * Define log level with -Dorg.slf4j.simpleLogger.defaultLogLevel=DEBUG in vm options
+ * Define log level in simplelogger.properties files (see resources)
  */
 private val logger = KotlinLogging.logger {}
 
 
 fun main(args: Array<String>) {
     logger.info { "Starting Forensic Data Import..." }
-    dataImportVariantWithCLICommand(args)
-    logger.info { "File Metadata uploaded. Forensic Data Import finished." }
+    //dataImportVariantWithCLICommand(args)
+    dataImportVariantWithHBase(args)
+    logger.info { "Forensic Data Import finished." }
+}
 
+/**
+ * Upload data via HBASE JAVA API into Hadoop Cluster / HDFS.
+ * Persist Metadata and small files into HBASE. Save large files
+ * directly in HDFS?
+ */
+fun dataImportVariantWithHBase(args: Array<String>){
+
+    val inputDirectory: Path
+    val hbaseSiteXML: Path?
+    when (args.size) {
+        1 -> {
+            inputDirectory = Paths.get(args[0])
+            hbaseSiteXML = null
+        }
+        2 -> {
+            inputDirectory = Paths.get(args[0])
+            hbaseSiteXML = Paths.get(args[1])
+        }
+        else -> {
+            logger.error {
+                "Wrong arguments! Follow syntax is provided:\n" +
+                        "LOCAL_SOURCE_DIR [HBASE_SITE_XML]\n" +
+                        "Use absolute paths for all arguments.\n" +
+                        "Example: java -jar data.import-1.0-SNAPSHOT-capsule.jar /home/hdtest/testdata/image /etc/hbase/conf/hbase-site.xml"
+            }
+            return
+        }
+    }
+
+    val import = HbaseImport(inputDirectory,hbaseSiteXML)
+
+    import.createTables()
+
+    val rootDirectory = inputDirectory.toFile()
+    Files.walk(rootDirectory.toPath())
+            .peek { it?.let { logger.trace { it } } }
+            .map { getFileMetadata(it, inputDirectory) }
+            .peek { it?.let { logger.trace { it } } }
+           .forEach { it?.let { import.uploadFile(it) } }
+
+    // Using Kotlin rootDir causes problems with symbolic link directories
+    //rootDirectory.walk(FileWalkDirection.TOP_DOWN)
+    //.onNext
+
+    //free resources
+    import.closeConnection()
 }
 
 /**
@@ -74,7 +123,7 @@ fun dataImportVariantWithCLICommand(args: Array<String>){
     val rootDirectory = inputDirectory.toFile()
     rootDirectory.walk(FileWalkDirection.TOP_DOWN)
             .map { getFileMetadata(it.toPath(), inputDirectory) }
-            .onEach { it?.let { println(it) } }
+            .onEach { it?.let { logger.trace { it } } }
             .forEach { it?.let { hdfsImportCli.uploadFileMetadata(it) } }
 
     hdfsImportCli.waitForExecution()

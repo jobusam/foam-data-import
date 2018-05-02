@@ -1,6 +1,7 @@
 package de.foam.data.import
 
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFileAttributeView
 
@@ -37,8 +38,9 @@ enum class FileType { DATA_FILE, DIRECTORY, SYMBOLIC_LINK, OTHER }
  * Retrieve file metadata from given filePath like owner, group, permissions and timestamps
  */
 fun getFileMetadata(filePath: Path, inputDirectory: Path): FileMetadata? {
-    val posixAttributes = Files.getFileAttributeView(filePath, PosixFileAttributeView::class.java)?.readAttributes()
-
+    // Don't follow symbolic links! (e.g. symbolic link can link to an file oustide the mounted/given image and it's not guaranteed that this linked file exists!
+    // see file /etc/cups/ssl/server.crt in ubuntu image v.1.0 -> the file itself is an symbolic link and the target file doesn't exist anymore!
+    val posixAttributes = Files.getFileAttributeView(filePath, PosixFileAttributeView::class.java,LinkOption.NOFOLLOW_LINKS)?.readAttributes()
     val fileType = when {
         Files.isSymbolicLink(filePath) -> FileType.SYMBOLIC_LINK
         Files.isRegularFile(filePath) -> FileType.DATA_FILE
@@ -55,7 +57,7 @@ fun getFileMetadata(filePath: Path, inputDirectory: Path): FileMetadata? {
         return FileMetadata(
                 inputDirectory.relativize(filePath).toString(),
                 fileType,
-                Files.size(filePath),
+                posixAttributes.size(),
                 posixAttributes.owner().toString(),
                 posixAttributes.group().toString(),
                 posixAttributes.permissions().toString(),

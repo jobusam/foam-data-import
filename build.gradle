@@ -1,5 +1,5 @@
 buildscript {
-    ext.kotlin_version = '1.2.40'
+    ext.kotlin_version = '1.2.41'
 
     repositories {
         mavenCentral()
@@ -32,17 +32,35 @@ repositories {
 }
 
 dependencies {
+    // Common dependencies
     compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
 
-    // For object serialization to JSON
-    compile 'com.google.code.gson:gson:2.8.2'
+    // Use reflection for e.g iterate of params of data classes
+    compile "org.jetbrains.kotlin:kotlin-reflect"
 
     // For Logging
     compile 'io.github.microutils:kotlin-logging:1.4.9'
     compile 'org.slf4j:slf4j-simple:1.7.25'
 
+    // Variant "Upload to HDFS via CLI" - For object serialization to JSON
+    compile 'com.google.code.gson:gson:2.8.2'
+
+    // Variant "Upload to HBASE"
+    compile 'org.apache.hbase:hbase-client:1.4.3'
+
     //For Testing
     testCompile group: 'junit', name: 'junit', version: '4.12'
+
+}
+
+// Following configuration is necessary to use slf4j-simple only.
+// Because hbase-client wants to use slf4j-log4j12!
+configurations.all {
+    resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+        if (details.requested.name == 'slf4j-log4j12') {
+            details.useTarget "org.slf4j:log4j-over-slf4j:1.7.25"
+        }
+    }
 }
 
 compileKotlin {

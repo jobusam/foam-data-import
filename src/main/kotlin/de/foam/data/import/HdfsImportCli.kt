@@ -9,7 +9,6 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
-
 /**
  * @author jobusam
  * Upload data into local HDFS. Use shell "hdfs" command for upload files and metadata.
@@ -27,6 +26,7 @@ import java.util.concurrent.Future
  * - Environment must be set up before!
  *  -- "hdfs" command must be available
  *  -- Default hdfs must be configured correctly
+ *  -- Correct version of hdfs binary!!!
  * - Raw data upload can be done recursively in one command.
  *   But metadata upload must be done per file. This is a lot of overhead because for every
  *   command execution an own sub process will be created. Only for a bunch of files (up to 20 files)
