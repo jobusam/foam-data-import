@@ -20,20 +20,23 @@ import kotlin.reflect.full.memberProperties
  * Upload data into HBASE. Use HBASE Java Client API to upload the data
  *
  * Advantages of this solution:
- * - File metadata is stored on Data Nodes
+ * - File metadata is stored HBASE Table on Data Nodes / Region Servers
  * - Small files are directly persisted in HBASE (no HDFS metadata overhead)
- * - Better handling of symbolic links
- *   - only entry in hbase will be created
- *   - avoid resolution and upload of character devices!
+ * - Better handling of specific files! Every file will be handled separately
+ *   - content of symbolic links and character devices WON'T be resolved
+ *      - upload metadata only
+ * - Default environment urls for HDFS and HBASE are available and can be configured
+ *
  *
  * Disadvantages:
  * - Files aren't directly accessible in HDFS
- * - For displaying directory hierarchy and files an own viewer must be implemented.
+ * - For displaying directory hierarchy and files a custom viewer must be implemented.
  * - The original filesystem structure is not directly persisted in HDFS
  *
  * TODO:
  * - Compile Hadoop native lib (libhadoop.so) for x64 Fedora to improve performance!
  * - Overall performance must be improved. The data import needs to much time!
+ *   - But at the moment the file uploads aren't executed in parallel!
  *
  * Result:
  * - This implementation works good but must be improved to work faster. At the moment
@@ -50,22 +53,27 @@ const val TABLE_NAME_FORENSIC_DATA = "forensicData"
 const val COLUMN_FAMILY_NAME_CONTENT = "content"
 const val COLUMN_FAMILY_NAME_METADATA = "metadata"
 
-class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?) {
+class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private val hdfsImport: HDFSImport) {
 
     private val logger = KotlinLogging.logger {}
-    private val config = HBaseConfiguration.create()
 
     private var connection : Connection? = null
-    private var rowCount = 0
 
+    private var rowCount = 0
     // for statistics only
     private var fileContentsInHBASE = 0
+    private var fileContentsInHDFS = 0
 
+
+    /**
+     * Initial connection to HBASE and share it for all data uploads
+     */
     init {
         logger.info { "Try to connect to HBASE..." }
         val url : URL? = hbaseSiteXML?.toUri()?.toURL() ?: HbaseImport::class.java.getResource("/hbase-site-client.xml")
         url?.let {
             logger.info{ "Use configuration file $url" }
+            val config = HBaseConfiguration.create()
             config.addResource(org.apache.hadoop.fs.Path(url.path))
             HBaseAdmin.checkHBaseAvailable(config)
             connection = ConnectionFactory.createConnection(config)
@@ -90,7 +98,6 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?) {
      * Create Tables for persisting files and file metadata in HBASE and HDFS
      */
     fun createTables(){
-        logger.info { "Create Tables in Hbase in case they are not available" }
         connection?.let { connection ->
             connection.admin.use { admin ->
 
@@ -98,29 +105,37 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?) {
                 table.addFamily(HColumnDescriptor(COLUMN_FAMILY_NAME_METADATA).setCompressionType(Compression.Algorithm.NONE))
                 table.addFamily(HColumnDescriptor(COLUMN_FAMILY_NAME_CONTENT).setCompressionType(Compression.Algorithm.NONE))
 
-                logger.info { "Creating table $table" }
+                logger.debug { "Creating table $table in HBASE" }
                 createOrOverwrite(admin, table)
-                logger.info { "Finished creation of table $table done" }
+                logger.trace { "Finished creation of table $table done" }
             }
         }
     }
 
     /**
-     * Upload a single file content and the given metadata into HBASE
+     * Upload a single file content and the given metadata into HBASE. If the file is
+     * very small (smaller than 10 MB ,see isSmallFile() method) than upload the file content directly
+     * into HBASE table. Otherwise upload the large file content into HDFS.
      */
     fun uploadFile(fileMetadata: FileMetadata) {
         connection?.let { connection ->
             logger.trace { "Upload Metadata of file ${inputDirectory.resolve(fileMetadata.relativeFilePath)}" }
             val table = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_DATA))
-            table.put(createPuts(fileMetadata))
+            val row = "row"+rowCount++
+            table.put(createPuts(fileMetadata,row))
+
+            if(FileType.DATA_FILE == fileMetadata.fileType && !isSmallFile(fileMetadata)){
+                // Use row index of hbase entry as file name for raw file content
+                hdfsImport.uploadFileIntoHDFS(fileMetadata.relativeFilePath,row)
+            }
         }
     }
 
     /**
      * create Put objects to import every metadata into a single column
      */
-    private fun createPuts(fileMetadata: FileMetadata): List<Put>{
-        val row = "row"+rowCount++
+    private fun createPuts(fileMetadata: FileMetadata, row: String): List<Put>{
+
         val utf8 = Charset.forName("utf-8")
 
         //TODO: save file timestamps in seperate columns!
@@ -130,26 +145,41 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?) {
                     "${it.get(fileMetadata)}".toByteArray(utf8))
         }.collect(Collectors.toList())
 
-        //TODO: upload large files directly into HDFS!
-        //raw data put
-        // The default maximum keyvalue size is 10 MB (10485760 Bytes)
-        // 10485660 (100 Bytes reserved for key itself ;) )
-        // Keep in mind. The default size in Hortonworks Data platform is 1 MB and should be increased at least to 10 MB!
-        if (FileType.DATA_FILE == fileMetadata.fileType &&fileMetadata.fileSize != null && 10485660 >= fileMetadata.fileSize){
-            val absolutePath = inputDirectory.resolve(fileMetadata.relativeFilePath)
-            puts.add(Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
-                    "fileContent".toByteArray(utf8),
-                    Files.readAllBytes(absolutePath)))
-            fileContentsInHBASE++
+        if(FileType.DATA_FILE == fileMetadata.fileType) {
+            if (isSmallFile(fileMetadata)) {
+                val absolutePath = inputDirectory.resolve(fileMetadata.relativeFilePath)
+                puts.add(Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
+                        "fileContent".toByteArray(utf8),
+                        Files.readAllBytes(absolutePath)))
+                fileContentsInHBASE++
+            } else {
+                //It's a large file. Therefore only save a file path in the database column "hdfsFilePath"
+                // Additionally the row index will be used as file name for the raw content in hdfs!
+                puts.add(Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
+                        "hdfsFilePath".toByteArray(utf8),
+                        hdfsImport.getHDFSBaseDirectory().resolve(row).toString().toByteArray(utf8)))
+                fileContentsInHDFS++
+            }
         }
         return puts
     }
+
+    private fun isSmallFile(fileMetadata: FileMetadata): Boolean{
+        // The default maximum keyvalue size is 10 MB (10485760 Bytes)
+        // 10485660 (100 Bytes reserved for key itself ;) )
+        // Keep in mind. The default size in Hortonworks Data platform is 1 MB and should be increased at least to 10 MB!
+        return fileMetadata.fileSize != null && 10485660 >= fileMetadata.fileSize
+    }
+
+
 
     /**
      * Close any open connection to HBASE. Call this method to release all resources of this instance!
      */
     fun closeConnection(){
-        logger.info { "Close Connections after uploading $rowCount files and $fileContentsInHBASE file contents into HBASE!" }
+        logger.info { "Close Connections after uploading $rowCount files! " +
+                "(Small files in HBASE = $fileContentsInHBASE; " +
+                "Large files  in HDFS = $fileContentsInHDFS)" }
         connection?.close()
         connection = null
     }

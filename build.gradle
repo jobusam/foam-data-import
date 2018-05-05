@@ -47,6 +47,7 @@ dependencies {
 
     // Variant "Upload to HBASE"
     compile 'org.apache.hbase:hbase-client:1.4.3'
+    compile 'org.apache.hadoop:hadoop-client:3.0.0'
 
     //For Testing
     testCompile group: 'junit', name: 'junit', version: '4.12'

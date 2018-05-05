@@ -31,49 +31,66 @@ fun main(args: Array<String>) {
 /**
  * Upload data via HBASE JAVA API into Hadoop Cluster / HDFS.
  * Persist Metadata and small files into HBASE. Save large files
- * directly in HDFS?
+ * directly in HDFS. Therefore the hdfsDirectoryPath defines the location,
+ * where large data files will be stored!
  */
 fun dataImportVariantWithHBase(args: Array<String>){
 
     val inputDirectory: Path
+    val hdfsDirectoryPath: Path
     val hbaseSiteXML: Path?
+    val hdfsCoreXML: Path?
     when (args.size) {
-        1 -> {
-            inputDirectory = Paths.get(args[0])
-            hbaseSiteXML = null
-        }
         2 -> {
             inputDirectory = Paths.get(args[0])
-            hbaseSiteXML = Paths.get(args[1])
+            hdfsDirectoryPath = Paths.get(args[1])
+            hbaseSiteXML = null
+            hdfsCoreXML = null
+        }
+        4 -> {
+            inputDirectory = Paths.get(args[0])
+            hdfsDirectoryPath = Paths.get(args[1])
+            hbaseSiteXML = Paths.get(args[2])
+            hdfsCoreXML = Paths.get(args[3])
         }
         else -> {
             logger.error {
                 "Wrong arguments! Follow syntax is provided:\n" +
-                        "LOCAL_SOURCE_DIR [HBASE_SITE_XML]\n" +
+                        "LOCAL_SOURCE_DIR REMOTE_HDFS_TARGET_DIR [HBASE_SITE_XML] [HDFS_CORE_XML]\n" +
                         "Use absolute paths for all arguments.\n" +
-                        "Example: java -jar data.import-1.0-SNAPSHOT-capsule.jar /home/hdtest/testdata/image /etc/hbase/conf/hbase-site.xml"
+                        "Example: java -jar data.import-1.0-SNAPSHOT-capsule.jar /home/hdtest/testdata/image /user/hdtest/image " +
+                        "/etc/hbase/conf/hbase-site.xml /etc/hadoop/conf/core-site.xml"
             }
             return
         }
     }
+    logger.info { "Use following parameters:\n inputDirectory = $inputDirectory\n " +
+            "hdfsDirectory = $hdfsDirectoryPath\n " +
+            "HBASE configuration path = $hbaseSiteXML (optional)\n" +
+            "HDFS configuration path = $hdfsCoreXML (optional)" }
 
-    val import = HbaseImport(inputDirectory,hbaseSiteXML)
+    val hdfsImport = HDFSImport(inputDirectory,hdfsDirectoryPath,hdfsCoreXML)
+    val hbaseImport = HbaseImport(inputDirectory,hbaseSiteXML,hdfsImport)
 
-    import.createTables()
+    logger.info { "Create Tables in HBASE" }
+    hbaseImport.createTables()
 
+    logger.info { "Upload files into HBASE and HDFS" }
     val rootDirectory = inputDirectory.toFile()
     Files.walk(rootDirectory.toPath())
+            //.parallel() //Keep in mind this can cause other problems (see https://dzone.com/articles/think-twice-using-java-8)
             .peek { it?.let { logger.trace { it } } }
             .map { getFileMetadata(it, inputDirectory) }
             .peek { it?.let { logger.trace { it } } }
-           .forEach { it?.let { import.uploadFile(it) } }
+           .forEach { it?.let { hbaseImport.uploadFile(it) } }
 
     // Using Kotlin rootDir causes problems with symbolic link directories
     //rootDirectory.walk(FileWalkDirection.TOP_DOWN)
     //.onNext
 
     //free resources
-    import.closeConnection()
+    hbaseImport.closeConnection()
+    hdfsImport.closeConnection()
 }
 
 /**

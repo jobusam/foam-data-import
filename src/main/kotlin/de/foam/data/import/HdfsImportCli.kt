@@ -33,8 +33,8 @@ import java.util.concurrent.Future
  *   the upload takes a while.
  * - Symbolic links on local file system will be resolved with "hdfs dfs -put" command.
  *   This leads to much more overhead on HDFS!
- *   CAUTION: The "hdfs -put" command hangs up in endless loop in case a symbolic link file
- *   refers to a non-existent file!
+ *   CAUTION: The "hdfs -put" command resolves symbolic links and tries to upload character devices.
+ *   This can hang up the data import...
  *   This is a huge drawback because operating systems like Linux images does contain a lot of symbolic links
  *   that refer to files which are only existent during runtime (like special devices, etc.).
  *
