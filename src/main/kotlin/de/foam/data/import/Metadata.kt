@@ -18,7 +18,30 @@ import java.nio.file.attribute.PosixFileAttributeView
 data class FileMetadata(val relativeFilePath: String, val fileType: FileType, val fileSize: Long?,
                         val owner: String, val group: String, val permissions: String,
                         val timestamps: FileTimestamps
-)
+){
+
+    /**
+     * Copy all properties into an hash map <propertyName,propertyValue>.
+     * This could be also done with reflection and foo::class.memberProperties method.
+     * But the reflection is more complex for embedded types. Also the api is more constant because,
+     * this property names will be later used in HBASE DB for metadata access...
+     */
+    fun toMap(): Map<String,String>{
+        // TODO: review! Maybe it's better to don't return optional values!
+        val values = mutableMapOf<String,String>()
+        values["relativeFilePath"] = this.relativeFilePath
+        values["fileType"] = this.fileType.toString()
+        values["fileSize"] = this.fileSize?.toString() ?: ""
+        values["owner"] = this.owner
+        values["group"] = this.group
+        values["permissions"] = this.permissions
+        values["lastModified"] = this.timestamps.lastModified
+        values["lastChanged"] = this.timestamps.lastChanged ?: ""
+        values["lastAccessed"] = this.timestamps.lastModified
+        values["created"] = this.timestamps.lastModified
+        return values
+    }
+}
 
 /**
  * Encapsulates file timestamps. Normally lastModified is always given.
@@ -35,7 +58,8 @@ data class FileTimestamps(
 enum class FileType { DATA_FILE, DIRECTORY, SYMBOLIC_LINK, OTHER }
 
 /**
- * Retrieve file metadata from given filePath like owner, group, permissions and timestamps
+ * Retrieve file metadata from given filePath like owner, group, permissions and timestamps.
+ * Keep in mind file timestamps should be always defined in UTC Timezone!
  */
 fun getFileMetadata(filePath: Path, inputDirectory: Path): FileMetadata? {
     // Don't follow symbolic links! (e.g. symbolic link can link to an file oustide the mounted/given image and it's not guaranteed that this linked file exists!

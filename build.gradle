@@ -35,9 +35,6 @@ dependencies {
     // Common dependencies
     compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
 
-    // Use reflection for e.g iterate of params of data classes
-    compile "org.jetbrains.kotlin:kotlin-reflect"
-
     // For Logging
     compile 'io.github.microutils:kotlin-logging:1.4.9'
     compile 'org.slf4j:slf4j-simple:1.7.25'

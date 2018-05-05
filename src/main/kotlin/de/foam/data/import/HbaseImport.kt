@@ -11,9 +11,6 @@ import java.nio.file.Path
 import java.net.URL
 import java.nio.charset.Charset
 import java.nio.file.Files
-import java.util.stream.Collectors
-import kotlin.reflect.full.memberProperties
-
 
 /**
  * @author jobusam
@@ -56,7 +53,7 @@ const val COLUMN_FAMILY_NAME_METADATA = "metadata"
 class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private val hdfsImport: HDFSImport) {
 
     private val logger = KotlinLogging.logger {}
-
+    private val utf8 = Charset.forName("utf-8")
     private var connection : Connection? = null
 
     private var rowCount = 0
@@ -136,32 +133,31 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
      */
     private fun createPuts(fileMetadata: FileMetadata, row: String): List<Put>{
 
-        val utf8 = Charset.forName("utf-8")
 
-        //TODO: save file timestamps in seperate columns!
-        val puts = FileMetadata::class.memberProperties.stream().map {
+
+        val map = fileMetadata.toMap().map {
             Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_METADATA.toByteArray(utf8),
-                    it.name.toByteArray(utf8),
-                    "${it.get(fileMetadata)}".toByteArray(utf8))
-        }.collect(Collectors.toList())
+                    it.key.toByteArray(utf8),
+                    it.value.toByteArray(utf8))
+        }
 
         if(FileType.DATA_FILE == fileMetadata.fileType) {
-            if (isSmallFile(fileMetadata)) {
+            return if (isSmallFile(fileMetadata)) {
+                fileContentsInHBASE++
                 val absolutePath = inputDirectory.resolve(fileMetadata.relativeFilePath)
-                puts.add(Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
+                map.plus(Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
                         "fileContent".toByteArray(utf8),
                         Files.readAllBytes(absolutePath)))
-                fileContentsInHBASE++
             } else {
                 //It's a large file. Therefore only save a file path in the database column "hdfsFilePath"
                 // Additionally the row index will be used as file name for the raw content in hdfs!
-                puts.add(Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
+                fileContentsInHDFS++
+                map.plus(Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
                         "hdfsFilePath".toByteArray(utf8),
                         hdfsImport.getHDFSBaseDirectory().resolve(row).toString().toByteArray(utf8)))
-                fileContentsInHDFS++
             }
         }
-        return puts
+        return map
     }
 
     private fun isSmallFile(fileMetadata: FileMetadata): Boolean{
@@ -170,8 +166,6 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
         // Keep in mind. The default size in Hortonworks Data platform is 1 MB and should be increased at least to 10 MB!
         return fileMetadata.fileSize != null && 10485660 >= fileMetadata.fileSize
     }
-
-
 
     /**
      * Close any open connection to HBASE. Call this method to release all resources of this instance!
