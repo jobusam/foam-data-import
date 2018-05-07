@@ -11,6 +11,7 @@ import java.nio.file.Path
 import java.net.URL
 import java.nio.charset.Charset
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * @author jobusam
@@ -56,10 +57,10 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
     private val utf8 = Charset.forName("utf-8")
     private var connection : Connection? = null
 
-    private var rowCount = 0
+    private val rowCount = AtomicInteger()
     // for statistics only
-    private var fileContentsInHBASE = 0
-    private var fileContentsInHDFS = 0
+    private val fileContentsInHbase = AtomicInteger()
+    private val fileContentsInHdfs = AtomicInteger()
 
 
     /**
@@ -118,7 +119,7 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
         connection?.let { connection ->
             logger.trace { "Upload Metadata of file ${inputDirectory.resolve(fileMetadata.relativeFilePath)}" }
             val table = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_DATA))
-            val row = "row"+rowCount++
+            val row = "row"+rowCount.getAndIncrement()
             table.put(createPuts(fileMetadata,row))
 
             if(FileType.DATA_FILE == fileMetadata.fileType && !isSmallFile(fileMetadata)){
@@ -143,7 +144,7 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
 
         if(FileType.DATA_FILE == fileMetadata.fileType) {
             return if (isSmallFile(fileMetadata)) {
-                fileContentsInHBASE++
+                fileContentsInHbase.incrementAndGet()
                 val absolutePath = inputDirectory.resolve(fileMetadata.relativeFilePath)
                 map.plus(Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
                         "fileContent".toByteArray(utf8),
@@ -151,7 +152,7 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
             } else {
                 //It's a large file. Therefore only save a file path in the database column "hdfsFilePath"
                 // Additionally the row index will be used as file name for the raw content in hdfs!
-                fileContentsInHDFS++
+                fileContentsInHdfs.incrementAndGet()
                 map.plus(Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
                         "hdfsFilePath".toByteArray(utf8),
                         hdfsImport.getHDFSBaseDirectory().resolve(row).toString().toByteArray(utf8)))
@@ -172,8 +173,8 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
      */
     fun closeConnection(){
         logger.info { "Close Connections after uploading $rowCount files! " +
-                "(Small files in HBASE = $fileContentsInHBASE; " +
-                "Large files  in HDFS = $fileContentsInHDFS)" }
+                "(Small files in HBASE = $fileContentsInHbase; " +
+                "Large files  in HDFS = $fileContentsInHdfs)" }
         connection?.close()
         connection = null
     }

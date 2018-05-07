@@ -78,7 +78,7 @@ fun dataImportVariantWithHBase(args: Array<String>){
     logger.info { "Upload files into HBASE and HDFS" }
     val rootDirectory = inputDirectory.toFile()
     Files.walk(rootDirectory.toPath())
-            //.parallel() //Keep in mind this can cause other problems (see https://dzone.com/articles/think-twice-using-java-8)
+            .parallel() //Keep in mind this can cause other problems (see https://dzone.com/articles/think-twice-using-java-8)
             .peek { it?.let { logger.trace { it } } }
             .map { getFileMetadata(it, inputDirectory) }
             .peek { it?.let { logger.trace { it } } }
