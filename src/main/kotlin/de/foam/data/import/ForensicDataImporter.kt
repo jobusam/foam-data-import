@@ -4,6 +4,10 @@ import mu.KotlinLogging
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.util.Arrays
+import javax.security.auth.login.AppConfigurationEntry
+import javax.security.auth.login.Configuration
+
 
 /**
  * @author jobusam
@@ -23,9 +27,40 @@ private val logger = KotlinLogging.logger {}
 
 fun main(args: Array<String>) {
     logger.info { "Starting Forensic Data Import..." }
-    //dataImportVariantWithCLICommand(args)
+    // addSecurityKerberos()
+    // dataImportVariantWithCLICommand(args)
     dataImportVariantWithHBase(args)
     logger.info { "Forensic Data Import finished." }
+}
+
+/**
+ * This method will set common Kerberos configurations.
+ * The configuration is not required if the data import will be executed
+ * on a local hadoop cluster instance because the system provides a proper
+ * configuration via system variables.
+ * So the at least the configuration has to be set / checked
+ * if the data import will be executed on an remote client that doesn't have any Kerberos access
+ * configured!
+ */
+fun addSecurityKerberos() {
+    // Following system properties are not required if the app is executed on local hadoop instance!
+    // At least the values will be retrieved automatically from system conf /etc/krb5.conf
+    // See https://docs.oracle.com/javase/8/docs/technotes/guides/security/jgss/tutorials/KerberosReq.html
+    System.setProperty("java.security.krb5.realm", "REALM_NAME")
+    System.setProperty("java.security.krb5.kdc", "HADOOP_SERVER_NAME")
+
+    // On a Hadoop cluster instance following is not required.
+    Configuration.setConfiguration(object : Configuration() {
+        override fun getAppConfigurationEntry(p0: String?): Array<AppConfigurationEntry> {
+
+            val properties = HashMap<String, String>()
+            properties.put("client", "true")
+
+            val configEntry = AppConfigurationEntry("com.sun.security.auth.module.Krb5LoginModule",
+                    AppConfigurationEntry.LoginModuleControlFlag.REQUIRED, properties)
+            return Arrays.asList(configEntry).toTypedArray()
+        }
+    })
 }
 
 /**
@@ -34,7 +69,7 @@ fun main(args: Array<String>) {
  * directly in HDFS. Therefore the hdfsDirectoryPath defines the location,
  * where large data files will be stored!
  */
-fun dataImportVariantWithHBase(args: Array<String>){
+fun dataImportVariantWithHBase(args: Array<String>) {
 
     val inputDirectory: Path
     val hdfsDirectoryPath: Path
@@ -64,13 +99,15 @@ fun dataImportVariantWithHBase(args: Array<String>){
             return
         }
     }
-    logger.info { "Use following parameters:\n inputDirectory = $inputDirectory\n " +
-            "hdfsDirectory = $hdfsDirectoryPath\n " +
-            "HBASE configuration path = $hbaseSiteXML (optional)\n" +
-            "HDFS configuration path = $hdfsCoreXML (optional)" }
+    logger.info {
+        "Use following parameters:\n inputDirectory = $inputDirectory\n " +
+                "hdfsDirectory = $hdfsDirectoryPath\n " +
+                "HBASE configuration path = $hbaseSiteXML (optional)\n" +
+                "HDFS configuration path = $hdfsCoreXML (optional)"
+    }
 
-    val hdfsImport = HDFSImport(inputDirectory,hdfsDirectoryPath,hdfsCoreXML)
-    val hbaseImport = HbaseImport(inputDirectory,hbaseSiteXML,hdfsImport)
+    val hdfsImport = HDFSImport(inputDirectory, hdfsDirectoryPath, hdfsCoreXML)
+    val hbaseImport = HbaseImport(inputDirectory, hbaseSiteXML, hdfsImport)
 
     logger.info { "Create Tables in HBASE" }
     hbaseImport.createTables()
@@ -82,7 +119,7 @@ fun dataImportVariantWithHBase(args: Array<String>){
             .peek { it?.let { logger.trace { it } } }
             .map { getFileMetadata(it, inputDirectory) }
             .peek { it?.let { logger.trace { it } } }
-           .forEach { it?.let { hbaseImport.uploadFile(it) } }
+            .forEach { it?.let { hbaseImport.uploadFile(it) } }
 
     // Using Kotlin rootDir causes problems with symbolic link directories
     //rootDirectory.walk(FileWalkDirection.TOP_DOWN)
@@ -97,7 +134,7 @@ fun dataImportVariantWithHBase(args: Array<String>){
  * Upload data into local HDFS. Use shell "hdfs" command for upload files and metadata.
  * See class HdfsImportCli for further details on this implementation
  */
-fun dataImportVariantWithCLICommand(args: Array<String>){
+fun dataImportVariantWithCLICommand(args: Array<String>) {
 
     val inputDirectory: Path
     val hdfsDirectoryPath: Path

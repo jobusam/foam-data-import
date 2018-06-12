@@ -32,6 +32,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * - The original filesystem structure is not directly persisted in HDFS
  *
  * TODO:
+ * - Add "/" to every relative file path. At the moment the imported root directory relative file path is empty!
+ * - symbolic links are recognized but their reference target should also be stored in HBASE
  * - Compile Hadoop native lib (libhadoop.so) for x64 Fedora to improve performance!
  * - Overall performance must be improved. The data import needs to much time!
  *   - But at the moment the file uploads aren't executed in parallel!
@@ -55,7 +57,7 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
 
     private val logger = KotlinLogging.logger {}
     private val utf8 = Charset.forName("utf-8")
-    private var connection : Connection? = null
+    private var connection: Connection? = null
 
     private val rowCount = AtomicInteger()
     // for statistics only
@@ -64,13 +66,16 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
 
 
     /**
-     * Initial connection to HBASE and share it for all data uploads
+     * Initial connection to HBASE and share it for all data uploads.
+     * TODO: Use one common configuration object for HDFS and HBASE. At the moment
+     * this implementation also works with Kerberos. But this is only a side effect,
+     * because Kerberos is already configured in HDFSImport!
      */
     init {
         logger.info { "Try to connect to HBASE..." }
-        val url : URL? = hbaseSiteXML?.toUri()?.toURL() ?: HbaseImport::class.java.getResource("/hbase-site-client.xml")
+        val url: URL? = hbaseSiteXML?.toUri()?.toURL() ?: HbaseImport::class.java.getResource("/hbase-site-client.xml")
         url?.let {
-            logger.info{ "Use configuration file $url" }
+            logger.info { "Use configuration file $url" }
             val config = HBaseConfiguration.create()
             config.addResource(org.apache.hadoop.fs.Path(url.path))
             HBaseAdmin.checkHBaseAvailable(config)
@@ -84,7 +89,7 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
      */
     private fun createOrOverwrite(admin: Admin, table: HTableDescriptor) {
         if (admin.tableExists(table.tableName)) {
-            if (admin.isTableEnabled(table.tableName)){
+            if (admin.isTableEnabled(table.tableName)) {
                 admin.disableTable(table.tableName)
             }
             admin.deleteTable(table.tableName)
@@ -95,7 +100,7 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
     /**
      * Create Tables for persisting files and file metadata in HBASE and HDFS
      */
-    fun createTables(){
+    fun createTables() {
         connection?.let { connection ->
             connection.admin.use { admin ->
 
@@ -119,12 +124,12 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
         connection?.let { connection ->
             logger.trace { "Upload Metadata of file ${inputDirectory.resolve(fileMetadata.relativeFilePath)}" }
             val table = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_DATA))
-            val row = "row"+rowCount.getAndIncrement()
-            table.put(createPuts(fileMetadata,row))
+            val row = "row" + rowCount.getAndIncrement()
+            table.put(createPuts(fileMetadata, row))
 
-            if(FileType.DATA_FILE == fileMetadata.fileType && !isSmallFile(fileMetadata)){
+            if (FileType.DATA_FILE == fileMetadata.fileType && !isSmallFile(fileMetadata)) {
                 // Use row index of hbase entry as file name for raw file content
-                hdfsImport.uploadFileIntoHDFS(fileMetadata.relativeFilePath,row)
+                hdfsImport.uploadFileIntoHDFS(fileMetadata.relativeFilePath, row)
             }
         }
     }
@@ -132,8 +137,7 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
     /**
      * create Put objects to import every metadata into a single column
      */
-    private fun createPuts(fileMetadata: FileMetadata, row: String): List<Put>{
-
+    private fun createPuts(fileMetadata: FileMetadata, row: String): List<Put> {
 
 
         val map = fileMetadata.toMap().map {
@@ -142,7 +146,7 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
                     it.value.toByteArray(utf8))
         }
 
-        if(FileType.DATA_FILE == fileMetadata.fileType) {
+        if (FileType.DATA_FILE == fileMetadata.fileType) {
             return if (isSmallFile(fileMetadata)) {
                 fileContentsInHbase.incrementAndGet()
                 val absolutePath = inputDirectory.resolve(fileMetadata.relativeFilePath)
@@ -161,7 +165,7 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
         return map
     }
 
-    private fun isSmallFile(fileMetadata: FileMetadata): Boolean{
+    private fun isSmallFile(fileMetadata: FileMetadata): Boolean {
         // The default maximum keyvalue size is 10 MB (10485760 Bytes)
         // 10485660 (100 Bytes reserved for key itself ;) )
         // Keep in mind. The default size in Hortonworks Data platform is 1 MB and should be increased at least to 10 MB!
@@ -171,10 +175,12 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
     /**
      * Close any open connection to HBASE. Call this method to release all resources of this instance!
      */
-    fun closeConnection(){
-        logger.info { "Close Connections after uploading $rowCount files! " +
-                "(Small files in HBASE = $fileContentsInHbase; " +
-                "Large files  in HDFS = $fileContentsInHdfs)" }
+    fun closeConnection() {
+        logger.info {
+            "Close Connections after uploading $rowCount files! " +
+                    "(Small files in HBASE = $fileContentsInHbase; " +
+                    "Large files  in HDFS = $fileContentsInHdfs)"
+        }
         connection?.close()
         connection = null
     }
