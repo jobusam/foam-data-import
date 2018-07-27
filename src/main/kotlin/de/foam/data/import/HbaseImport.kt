@@ -46,7 +46,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * Alternative way:
  * There is also another column-bases database called Apache Accumulo available
  * in HADOOP ecosystem. The APIs are slightly different but the performance should
- * be the same (acoording to several blog posts).
+ * be the same (according to several blog posts).
  *
  */
 const val TABLE_NAME_FORENSIC_DATA = "forensicData"
@@ -105,7 +105,9 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
             connection.admin.use { admin ->
 
                 val table = HTableDescriptor(TableName.valueOf(TABLE_NAME_FORENSIC_DATA))
-                table.addFamily(HColumnDescriptor(COLUMN_FAMILY_NAME_METADATA).setCompressionType(Compression.Algorithm.NONE))
+                table.addFamily(HColumnDescriptor(COLUMN_FAMILY_NAME_METADATA)
+                        // Set the replication scope to 1 is very important for replicate data with hbase-indexer to solr!
+                        .setCompressionType(Compression.Algorithm.NONE).setScope(1))
                 table.addFamily(HColumnDescriptor(COLUMN_FAMILY_NAME_CONTENT).setCompressionType(Compression.Algorithm.NONE))
 
                 logger.debug { "Creating table $table in HBASE" }

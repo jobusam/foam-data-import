@@ -1,5 +1,5 @@
 buildscript {
-    ext.kotlin_version = '1.2.41'
+    ext.kotlin_version = '1.2.51'
 
     repositories {
         mavenCentral()
@@ -25,8 +25,6 @@ apply plugin: 'kotlin'
 // us.kirchmeier.capsule plugin is used to build fat jars will all dependency for better deployment!
 apply plugin: 'us.kirchmeier.capsule'
 
-sourceCompatibility = 1.8
-
 repositories {
     mavenCentral()
 }
@@ -43,6 +41,7 @@ dependencies {
     compile 'com.google.code.gson:gson:2.8.2'
 
     // Variant "Upload to HBASE"
+    // TODO Use hbase version 1.1.2 (same like hdp 2.6.5. and local installation)
     compile 'org.apache.hbase:hbase-client:1.4.3'
     compile 'org.apache.hadoop:hadoop-client:3.0.0'
 
