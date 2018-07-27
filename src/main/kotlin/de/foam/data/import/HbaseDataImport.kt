@@ -53,7 +53,7 @@ const val TABLE_NAME_FORENSIC_DATA = "forensicData"
 const val COLUMN_FAMILY_NAME_CONTENT = "content"
 const val COLUMN_FAMILY_NAME_METADATA = "metadata"
 
-class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private val hdfsImport: HDFSImport) {
+class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private val hdfsDataImport: HDFSDataImport) {
 
     private val logger = KotlinLogging.logger {}
     private val utf8 = Charset.forName("utf-8")
@@ -69,11 +69,11 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
      * Initial connection to HBASE and share it for all data uploads.
      * TODO: Use one common configuration object for HDFS and HBASE. At the moment
      * this implementation also works with Kerberos. But this is only a side effect,
-     * because Kerberos is already configured in HDFSImport!
+     * because Kerberos is already configured in HDFSDataImport!
      */
     init {
         logger.info { "Try to connect to HBASE..." }
-        val url: URL? = hbaseSiteXML?.toUri()?.toURL() ?: HbaseImport::class.java.getResource("/hbase-site-client.xml")
+        val url: URL? = hbaseSiteXML?.toUri()?.toURL() ?: HbaseDataImport::class.java.getResource("/hbase-site-client.xml")
         url?.let {
             logger.info { "Use configuration file $url" }
             val config = HBaseConfiguration.create()
@@ -131,7 +131,7 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
 
             if (FileType.DATA_FILE == fileMetadata.fileType && !isSmallFile(fileMetadata)) {
                 // Use row index of hbase entry as file name for raw file content
-                hdfsImport.uploadFileIntoHDFS(fileMetadata.relativeFilePath, row)
+                hdfsDataImport.uploadFileIntoHDFS(fileMetadata.relativeFilePath, row)
             }
         }
     }
@@ -161,7 +161,7 @@ class HbaseImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private
                 fileContentsInHdfs.incrementAndGet()
                 map.plus(Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
                         "hdfsFilePath".toByteArray(utf8),
-                        hdfsImport.getHDFSBaseDirectory().resolve(row).toString().toByteArray(utf8)))
+                        hdfsDataImport.getHDFSBaseDirectory().resolve(row).toString().toByteArray(utf8)))
             }
         }
         return map

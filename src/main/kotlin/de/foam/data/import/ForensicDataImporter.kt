@@ -106,8 +106,8 @@ fun dataImportVariantWithHBase(args: Array<String>) {
                 "HDFS configuration path = $hdfsCoreXML (optional)"
     }
 
-    val hdfsImport = HDFSImport(inputDirectory, hdfsDirectoryPath, hdfsCoreXML)
-    val hbaseImport = HbaseImport(inputDirectory, hbaseSiteXML, hdfsImport)
+    val hdfsImport = HDFSDataImport(inputDirectory, hdfsDirectoryPath, hdfsCoreXML)
+    val hbaseImport = HbaseDataImport(inputDirectory, hbaseSiteXML, hdfsImport)
 
     logger.info { "Create Tables in HBASE" }
     hbaseImport.createTables()

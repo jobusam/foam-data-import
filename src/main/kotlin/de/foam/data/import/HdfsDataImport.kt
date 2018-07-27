@@ -16,7 +16,7 @@ const val HADOOP_DEFAULT_FS = "hdfs://localhost:9000"
  * @author jobusam
  * Upload a file into HDFS. Therefore use the HDFS JAVA Client API.
  */
-class HDFSImport(private val inputDirectory: Path, private val hdfsBaseDirectory: Path, hdfsCoreXML: Path?) {
+class HDFSDataImport(private val inputDirectory: Path, private val hdfsBaseDirectory: Path, hdfsCoreXML: Path?) {
 
     private val logger = KotlinLogging.logger {}
 
