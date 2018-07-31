@@ -3,16 +3,9 @@ buildscript {
 
     repositories {
         mavenCentral()
-
-        // used for kirchmeier.capsule plugin
-        maven {
-            url "https://plugins.gradle.org/m2/"
-        }
     }
     dependencies {
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-        // need kirchmeier.capsule plugin
-        classpath "us.kirchmeier:gradle-capsule-plugin:1.0.2"
     }
 }
 
@@ -21,9 +14,7 @@ version '1.0-SNAPSHOT'
 
 apply plugin: 'java'
 apply plugin: 'kotlin'
-
-// us.kirchmeier.capsule plugin is used to build fat jars will all dependency for better deployment!
-apply plugin: 'us.kirchmeier.capsule'
+apply plugin: 'application'
 
 repositories {
     mavenCentral()
@@ -53,6 +44,8 @@ dependencies {
 
 }
 
+mainClassName = 'de.foam.data.import.ForensicDataImporterKt'
+
 // Following configuration is necessary to use slf4j-simple only.
 // Because hbase-client wants to use slf4j-log4j12!
 configurations.all {
@@ -68,12 +61,4 @@ compileKotlin {
 }
 compileTestKotlin {
     kotlinOptions.jvmTarget = "1.8"
-}
-
-task buildFatJar(type:FatCapsule){
-    applicationClass 'de.foam.data.import.ForensicDataImporterKt'
-
-    capsuleManifest {
-        minJavaVersion = '1.8.0'
-    }
 }
