@@ -1,5 +1,12 @@
 package de.foam.data.import
 
+import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.arguments.convert
+import com.github.ajalt.clikt.parameters.options.convert
+import com.github.ajalt.clikt.parameters.options.flag
+import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.int
 import mu.KotlinLogging
 import java.nio.file.Files
 import java.nio.file.Path
@@ -7,6 +14,7 @@ import java.nio.file.Paths
 import java.util.Arrays
 import javax.security.auth.login.AppConfigurationEntry
 import javax.security.auth.login.Configuration
+import kotlin.collections.HashMap
 
 
 /**
@@ -18,6 +26,9 @@ import javax.security.auth.login.Configuration
  * and reviewed in this simple application.
  */
 
+
+const val DEFAULT_HDFS_BASE_DIRECTORY = "/data/"
+
 /**
  * Use kotlin-logging (Micro-Utils).
  * Define log level in simplelogger.properties files (see resources)
@@ -26,11 +37,70 @@ private val logger = KotlinLogging.logger {}
 
 
 fun main(args: Array<String>) {
-    logger.info { "Starting Forensic Data Import..." }
+
     // addSecurityKerberos()
     // dataImportVariantWithCLICommand(args)
-    dataImportVariantWithHBase(args)
-    logger.info { "Forensic Data Import finished." }
+    ForensicImportCommand().main(args)
+
+}
+
+class ForensicImportCommand : CliktCommand() {
+
+    private val verbose: Boolean by option("-v", "--verbose", help = "enable verbose mode").flag()
+    private val inputDirectory: Path by argument(help = "local source directory").convert { Paths.get(it) }
+    private val hdfsBaseDirectory: Path? by option("-o", "--hdfsBaseDirectory", help = "base directry in hdfs where large files will be stored").convert { Paths.get(it) }
+    private val hbaseSiteXmlFile: Path? by option("-x", "--hbaseSiteXml", help = "file path to hbase-site.xml configuration file").convert { Paths.get(it) }
+    private val hdfsSiteXmlFile: Path? by option("-y", "--hdfsSiteXml", help = "file path to hdfs core-site.xml configuration file").convert { Paths.get(it) }
+    private val caseNumber: Int? by option("-c", "--caseNumber", help = "To which case this evidence belongs").int()
+    private val examiner: String? by option("-e", "--examiner", help = "The name of the examiner")
+
+    override fun run() {
+        logger.info { "Starting Forensic Data Import..." }
+        logger.info {
+            "Use following parameters:\n " +
+                    "inputDirectory = $inputDirectory\n " +
+                    "hdfsBaseDirectory = $hdfsBaseDirectory (optional)\n " +
+                    "HBASE configuration path = $hbaseSiteXmlFile (optional)\n " +
+                    "HDFS configuration path = $hdfsSiteXmlFile (optional)\n " +
+                    "Examiner = $examiner (optional)\n " +
+                    "Case Number = $caseNumber (optional)\n " +
+                    "Verbose = $verbose (optional)\n "
+        }
+        importDataVariantWithHbase()
+        logger.info { "Forensic Data Import finished." }
+    }
+
+    /**
+     * Upload data via HBASE JAVA API into Hadoop Cluster / HDFS.
+     * Persist Metadata and small files into HBASE. Save large files
+     * directly in HDFS. Therefore the hdfsDirectoryPath defines the location,
+     * where large data files will be stored!
+     */
+    private fun importDataVariantWithHbase() {
+
+        val hdfsImport = HDFSDataImport(inputDirectory, hdfsBaseDirectory ?: Paths.get(DEFAULT_HDFS_BASE_DIRECTORY), hdfsSiteXmlFile)
+        val hbaseImport = HbaseDataImport(inputDirectory, hbaseSiteXmlFile, hdfsImport)
+
+        logger.info { "Create Tables in HBASE" }
+        hbaseImport.createTables()
+
+        logger.info { "Upload files into HBASE and HDFS" }
+        val rootDirectory = inputDirectory.toFile()
+        Files.walk(rootDirectory.toPath())
+                .parallel() //Keep in mind this can cause other problems (see https://dzone.com/articles/think-twice-using-java-8)
+                .peek { it?.let { logger.trace { it } } }
+                .map { getFileMetadata(it, inputDirectory) }
+                .peek { it?.let { logger.trace { it } } }
+                .forEach { it?.let { hbaseImport.uploadFile(it) } }
+
+        // Using Kotlin rootDir causes problems with symbolic link directories
+        //rootDirectory.walk(FileWalkDirection.TOP_DOWN)
+        //.onNext
+
+        //free resources
+        hbaseImport.closeConnection()
+        hdfsImport.closeConnection()
+    }
 }
 
 /**
@@ -54,7 +124,7 @@ fun addSecurityKerberos() {
         override fun getAppConfigurationEntry(p0: String?): Array<AppConfigurationEntry> {
 
             val properties = HashMap<String, String>()
-            properties.put("client", "true")
+            properties["client"] = "true"
 
             val configEntry = AppConfigurationEntry("com.sun.security.auth.module.Krb5LoginModule",
                     AppConfigurationEntry.LoginModuleControlFlag.REQUIRED, properties)
@@ -63,72 +133,6 @@ fun addSecurityKerberos() {
     })
 }
 
-/**
- * Upload data via HBASE JAVA API into Hadoop Cluster / HDFS.
- * Persist Metadata and small files into HBASE. Save large files
- * directly in HDFS. Therefore the hdfsDirectoryPath defines the location,
- * where large data files will be stored!
- */
-fun dataImportVariantWithHBase(args: Array<String>) {
-
-    val inputDirectory: Path
-    val hdfsDirectoryPath: Path
-    val hbaseSiteXML: Path?
-    val hdfsCoreXML: Path?
-    when (args.size) {
-        2 -> {
-            inputDirectory = Paths.get(args[0])
-            hdfsDirectoryPath = Paths.get(args[1])
-            hbaseSiteXML = null
-            hdfsCoreXML = null
-        }
-        4 -> {
-            inputDirectory = Paths.get(args[0])
-            hdfsDirectoryPath = Paths.get(args[1])
-            hbaseSiteXML = Paths.get(args[2])
-            hdfsCoreXML = Paths.get(args[3])
-        }
-        else -> {
-            logger.error {
-                "Wrong arguments! Follow syntax is provided:\n" +
-                        "LOCAL_SOURCE_DIR REMOTE_HDFS_TARGET_DIR [HBASE_SITE_XML] [HDFS_CORE_XML]\n" +
-                        "Use absolute paths for all arguments.\n" +
-                        "Example: java -jar data.import-1.0-SNAPSHOT-capsule.jar /home/hdtest/testdata/image /user/hdtest/image " +
-                        "/etc/hbase/conf/hbase-site.xml /etc/hadoop/conf/core-site.xml"
-            }
-            return
-        }
-    }
-    logger.info {
-        "Use following parameters:\n inputDirectory = $inputDirectory\n " +
-                "hdfsDirectory = $hdfsDirectoryPath\n " +
-                "HBASE configuration path = $hbaseSiteXML (optional)\n" +
-                "HDFS configuration path = $hdfsCoreXML (optional)"
-    }
-
-    val hdfsImport = HDFSDataImport(inputDirectory, hdfsDirectoryPath, hdfsCoreXML)
-    val hbaseImport = HbaseDataImport(inputDirectory, hbaseSiteXML, hdfsImport)
-
-    logger.info { "Create Tables in HBASE" }
-    hbaseImport.createTables()
-
-    logger.info { "Upload files into HBASE and HDFS" }
-    val rootDirectory = inputDirectory.toFile()
-    Files.walk(rootDirectory.toPath())
-            .parallel() //Keep in mind this can cause other problems (see https://dzone.com/articles/think-twice-using-java-8)
-            .peek { it?.let { logger.trace { it } } }
-            .map { getFileMetadata(it, inputDirectory) }
-            .peek { it?.let { logger.trace { it } } }
-            .forEach { it?.let { hbaseImport.uploadFile(it) } }
-
-    // Using Kotlin rootDir causes problems with symbolic link directories
-    //rootDirectory.walk(FileWalkDirection.TOP_DOWN)
-    //.onNext
-
-    //free resources
-    hbaseImport.closeConnection()
-    hdfsImport.closeConnection()
-}
 
 /**
  * Upload data into local HDFS. Use shell "hdfs" command for upload files and metadata.
@@ -160,7 +164,6 @@ fun dataImportVariantWithCLICommand(args: Array<String>) {
         }
     }
 
-
     logger.info {
         "Data from input data directory <$inputDirectory>" +
                 " will be uploaded to hdfs target directory <$hdfsDirectoryPath>"
@@ -182,5 +185,3 @@ fun dataImportVariantWithCLICommand(args: Array<String>) {
 
     hdfsImportCli.waitForExecution()
 }
-
-

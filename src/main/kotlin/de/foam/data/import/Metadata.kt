@@ -73,7 +73,7 @@ fun getFileMetadata(filePath: Path, inputDirectory: Path): FileMetadata? {
     }
 
 
-    posixAttributes?.let({
+    posixAttributes?.let {
 
         val timestamps = FileTimestamps(posixAttributes.lastModifiedTime().toString(),
                 lastAccessed = posixAttributes.lastAccessTime().toString(),
@@ -86,6 +86,6 @@ fun getFileMetadata(filePath: Path, inputDirectory: Path): FileMetadata? {
                 posixAttributes.group().toString(),
                 posixAttributes.permissions().toString(),
                 timestamps)
-    })
+    }
     return null
 }

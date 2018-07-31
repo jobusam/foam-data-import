@@ -37,6 +37,9 @@ dependencies {
     compile 'io.github.microutils:kotlin-logging:1.4.9'
     compile 'org.slf4j:slf4j-simple:1.7.25'
 
+    // For argument parsing
+    compile 'com.github.ajalt:clikt:1.3.0'
+
     // Variant "Upload to HDFS via CLI" - For object serialization to JSON
     compile 'com.google.code.gson:gson:2.8.2'
 
