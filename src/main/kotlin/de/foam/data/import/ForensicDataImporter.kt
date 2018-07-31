@@ -40,19 +40,31 @@ fun main(args: Array<String>) {
 
     // addSecurityKerberos()
     // dataImportVariantWithCLICommand(args)
-    ForensicImportCommand().main(args)
+    ForensicDataImport().main(args)
 
 }
 
-class ForensicImportCommand : CliktCommand() {
+class ForensicDataImport : CliktCommand() {
 
     private val verbose: Boolean by option("-v", "--verbose", help = "enable verbose mode").flag()
-    private val inputDirectory: Path by argument(help = "local source directory").convert { Paths.get(it) }
-    private val hdfsBaseDirectory: Path? by option("-o", "--hdfsBaseDirectory", help = "base directry in hdfs where large files will be stored").convert { Paths.get(it) }
-    private val hbaseSiteXmlFile: Path? by option("-x", "--hbaseSiteXml", help = "file path to hbase-site.xml configuration file").convert { Paths.get(it) }
-    private val hdfsSiteXmlFile: Path? by option("-y", "--hdfsSiteXml", help = "file path to hdfs core-site.xml configuration file").convert { Paths.get(it) }
-    private val caseNumber: Int? by option("-c", "--caseNumber", help = "To which case this evidence belongs").int()
-    private val examiner: String? by option("-e", "--examiner", help = "The name of the examiner")
+
+    private val inputDirectory: Path by argument(
+            help = "contains the path to local source directory that shall be imported into forensic analysis platform").convert { Paths.get(it) }
+
+    private val hdfsBaseDirectory: Path? by option("-o", "--hdfsBaseDirectory",
+            help = "contains the base directory in HDFS where large files will be stored. The default is $DEFAULT_HDFS_BASE_DIRECTORY").convert { Paths.get(it) }
+
+    private val hbaseSiteXmlFile: Path? by option("-x", "--hbaseSiteXml",
+            help = "contains file path to hbase-site.xml configuration file. If not given use localhost:2181 for connecting to Zookeeper").convert { Paths.get(it) }
+
+    private val hdfsSiteXmlFile: Path? by option("-y", "--hdfsSiteXml",
+            help = "contains file path to Hadoop core-site.xml configuration file. If not given use default hdfs uri hdfs://localhost:9000").convert { Paths.get(it) }
+
+    private val caseNumber: Int? by option("-c", "--caseNumber",
+            help = "To which case this evidence belongs").int()
+
+    private val examiner: String? by option("-e", "--examiner",
+            help = "The name of the examiner")
 
     override fun run() {
         logger.info { "Starting Forensic Data Import..." }
@@ -78,7 +90,8 @@ class ForensicImportCommand : CliktCommand() {
      */
     private fun importDataVariantWithHbase() {
 
-        val hdfsImport = HDFSDataImport(inputDirectory, hdfsBaseDirectory ?: Paths.get(DEFAULT_HDFS_BASE_DIRECTORY), hdfsSiteXmlFile)
+        val hdfsImport = HDFSDataImport(inputDirectory, hdfsBaseDirectory
+                ?: Paths.get(DEFAULT_HDFS_BASE_DIRECTORY), hdfsSiteXmlFile)
         val hbaseImport = HbaseDataImport(inputDirectory, hbaseSiteXmlFile, hdfsImport)
 
         logger.info { "Create Tables in HBASE" }
