@@ -2,18 +2,12 @@ package de.foam.dataimport
 
 import de.foam.dataimport.casemanagement.ForensicCase
 import de.foam.dataimport.casemanagement.ForensicCaseManager
-import de.foam.dataimport.casemanagement.ForensicExhibit
 import mu.KotlinLogging
-import org.apache.hadoop.hbase.HBaseConfiguration
 import org.apache.hadoop.hbase.HColumnDescriptor
 import org.apache.hadoop.hbase.HTableDescriptor
 import org.apache.hadoop.hbase.TableName
-import org.apache.hadoop.hbase.client.Connection
-import org.apache.hadoop.hbase.client.ConnectionFactory
-import org.apache.hadoop.hbase.client.HBaseAdmin
 import org.apache.hadoop.hbase.client.Put
 import org.apache.hadoop.hbase.io.compress.Compression
-import java.net.URL
 import java.nio.charset.Charset
 import java.nio.file.Files
 import java.nio.file.Path
@@ -59,22 +53,20 @@ const val TABLE_NAME_FORENSIC_DATA = "forensicData"
 const val COLUMN_FAMILY_NAME_CONTENT = "content"
 const val COLUMN_FAMILY_NAME_METADATA = "metadata"
 
-class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?,
-                      private val hdfsDataImport: HDFSDataImport,
-                      forensicCase: ForensicCase, forensicExhibit: ForensicExhibit) {
+class HbaseDataImport(private val inputDirectory: Path, private val hdfsDataImport: HDFSDataImport,
+                      forensicCase: ForensicCase) {
 
     private val logger = KotlinLogging.logger {}
     private val utf8 = Charset.forName("utf-8")
-    private var connection: Connection? = null
 
-    private val rowPrefix:String
+    private val rowPrefix: String
     private val rowCount = AtomicInteger()
 
     // for statistics only
     private val fileContentsInHbase = AtomicInteger()
     private val fileContentsInHdfs = AtomicInteger()
 
-    private val caseManager = ForensicCaseManager { connection }
+    private val caseManager = ForensicCaseManager()
 
 
     /**
@@ -84,21 +76,12 @@ class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?,
      * because Kerberos is already configured in HDFSDataImport!
      */
     init {
-        logger.info { "Try to connect to HBASE..." }
-        val url: URL? = hbaseSiteXML?.toUri()?.toURL()
-                ?: HbaseDataImport::class.java.getResource("/hbase-site-client.xml")
-        url?.let {
-            logger.info { "Use configuration file $url" }
-            val config = HBaseConfiguration.create()
-            config.addResource(org.apache.hadoop.fs.Path(url.path))
-            HBaseAdmin.checkHBaseAvailable(config)
-            connection = ConnectionFactory.createConnection(config)
-        }
+
 
         logger.info { "Create Tables in HBASE" }
         createTables()
 
-        val exhibitId = caseManager.createNewCase(forensicCase,forensicExhibit) ?: ""
+        val exhibitId = caseManager.createNewCase(forensicCase) ?: ""
         rowPrefix = exhibitId
         hdfsDataImport.createHDFSExhibitDiretory(exhibitId)
     }
@@ -134,12 +117,12 @@ class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?,
      * into HBASE table. Otherwise upload the large file content into HDFS.
      */
     fun uploadFile(fileMetadata: FileMetadata) {
-        connection?.let { connection ->
+        HBaseConnection.connection?.let { connection ->
             logger.trace { "Upload Metadata of file ${inputDirectory.resolve(fileMetadata.relativeFilePath)}" }
             val table = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_DATA))
             val rowKey = "${rowPrefix}_${rowCount.getAndIncrement()}"
             table.put(createPuts(fileMetadata, rowKey))
-
+            table.close()
             if (FileType.DATA_FILE == fileMetadata.fileType && !isSmallFile(fileMetadata)) {
                 // Use row index of hbase entry as file name for raw file content
                 hdfsDataImport.uploadFileIntoHDFS(fileMetadata.relativeFilePath, rowKey)
@@ -188,14 +171,12 @@ class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?,
     /**
      * Close any open connection to HBASE. Call this method to release all resources of this instance!
      */
-    fun closeConnection() {
+    fun displayStatus() {
         logger.info {
             "Close Connections after uploading $rowCount files! " +
                     "(Small files in HBASE = $fileContentsInHbase; " +
                     "Large files  in HDFS = $fileContentsInHdfs)"
         }
-        connection?.close()
-        connection = null
     }
 
 }

@@ -31,8 +31,8 @@ class HDFSDataImport(private val inputDirectory: Path, private val hdfsBaseDirec
         //val conf = createKerberosConf()
         filesystem = FileSystem.get(conf)
         val hdfsPath = org.apache.hadoop.fs.Path(hdfsBaseDirectory.toString())
-        if(filesystem?.exists(hdfsPath)?:FALSE)
-        logger.info { "Base directory $hdfsBaseDirectory already exist." }
+        if (filesystem?.exists(hdfsPath) ?: FALSE)
+            logger.info { "Base directory $hdfsBaseDirectory already exist." }
         else {
             logger.info { "Create a new Base Directory $hdfsBaseDirectory" }
             filesystem?.mkdirs(hdfsPath)
@@ -78,24 +78,27 @@ class HDFSDataImport(private val inputDirectory: Path, private val hdfsBaseDirec
 
     fun uploadFileIntoHDFS(relativeFilePath: String, targetFileName: String) {
         val inputFilePath = org.apache.hadoop.fs.Path(inputDirectory.resolve(relativeFilePath).toUri())
-        val targetHDFSFilePath = org.apache.hadoop.fs.Path((hdfsExhibitDirectory?:hdfsBaseDirectory).resolve(targetFileName).toString())
+        val targetHDFSFilePath = org.apache.hadoop.fs.Path((hdfsExhibitDirectory
+                ?: hdfsBaseDirectory).resolve(targetFileName).toString())
         filesystem?.copyFromLocalFile(inputFilePath, targetHDFSFilePath)
         logger.trace { "HDFS Upload <$inputFilePath> to HDFS:$targetHDFSFilePath" }
     }
 
-    fun createHDFSExhibitDiretory( exhibitID:String){
+    fun createHDFSExhibitDiretory(exhibitID: String) {
         hdfsExhibitDirectory = hdfsBaseDirectory.resolve(exhibitID)
         val hdfsCasePath = org.apache.hadoop.fs.Path(hdfsExhibitDirectory.toString())
-        if(filesystem?.exists(hdfsCasePath)?:FALSE)
-            logger.warn { "Caution: Case directory $hdfsExhibitDirectory already exist " +
-                    "and will be used for file upload. But normally this directory shouldn't exist." }
+        if (filesystem?.exists(hdfsCasePath) ?: FALSE)
+            logger.warn {
+                "Caution: Case directory $hdfsExhibitDirectory already exist " +
+                        "and will be used for file upload. But normally this directory shouldn't exist."
+            }
         else {
             logger.info { "Create a new Case Directory $hdfsExhibitDirectory" }
             filesystem?.mkdirs(hdfsCasePath)
         }
     }
 
-    fun getHDFSExhibitDirectory(): Path = this.hdfsExhibitDirectory?:hdfsBaseDirectory
+    fun getHDFSExhibitDirectory(): Path = this.hdfsExhibitDirectory ?: hdfsBaseDirectory
 
     fun closeConnection() {
         logger.info { "Close Connection to HDFS" }

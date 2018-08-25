@@ -1,10 +1,10 @@
 package de.foam.dataimport.casemanagement
 
+import de.foam.dataimport.HBaseConnection
 import mu.KotlinLogging
 import org.apache.hadoop.hbase.HColumnDescriptor
 import org.apache.hadoop.hbase.HTableDescriptor
 import org.apache.hadoop.hbase.TableName
-import org.apache.hadoop.hbase.client.Connection
 import org.apache.hadoop.hbase.client.Put
 import org.apache.hadoop.hbase.client.Scan
 import org.apache.hadoop.hbase.client.Table
@@ -25,7 +25,7 @@ const val TABLE_NAME_FORENSIC_CASE = "forensicCase"
 const val TABLE_NAME_FORENSIC_EXHIBIT = "forensicExhibit"
 const val COLUMN_FAMILY_NAME_COMMON = "common"
 
-class ForensicCaseManager(private val getConnection: () -> Connection?) {
+class ForensicCaseManager() {
 
     private val logger = KotlinLogging.logger {}
     private val utf8 = Charset.forName("utf-8")
@@ -55,28 +55,72 @@ class ForensicCaseManager(private val getConnection: () -> Connection?) {
     }
 
     /**
+     * Display all created cases and imported Exhibits
+     */
+    fun displayCasesAndExhibits() {
+
+        HBaseConnection.connection?.let { connection ->
+            val caseTable = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_CASE))
+            val exhibitTable = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_EXHIBIT))
+
+            //Do a full table scan. But normally not many data entries are persisted in these tables
+            val cases = caseTable.getScanner(Scan())
+            val cfc = COLUMN_FAMILY_NAME_COMMON.toByteArray(utf8)
+
+            val output = StringBuilder()
+
+            cases.forEach { case ->
+                val caseId = case.row.toString(utf8)
+                val caseNumber:String? = case.getValue(cfc , FORENSIC_CASE_CASE_NUMBER.toByteArray(utf8))?.toString(utf8)
+                val caseName:String? = case.getValue(cfc , FORENSIC_CASE_CASE_NAME.toByteArray(utf8))?.toString(utf8)
+                val examiner:String? = case.getValue(cfc , FORENSIC_CASE_CASE_EXAMINER.toByteArray(utf8))?.toString(utf8)
+
+                output.append("\n\n$caseId - Case: Number = <$caseNumber>, Name = <$caseName>, Examiner = <$examiner>\n")
+
+                exhibitTable.getScanner(Scan()).filter { exhibit ->
+                    exhibit.row.toString(utf8).startsWith(case.row.toString(utf8))
+                }.forEach { exhibit ->
+                    val exhibitId = exhibit.row.toString(utf8)
+                    val exhibitName:String? = exhibit.getValue(cfc , FORENSIC_EXHIBIT_EXHIBIT_NAME.toByteArray(utf8))?.toString(utf8)
+                    val importDate:String? = exhibit.getValue(cfc , FORENSIC_EXHIBIT_IMPORT_DATE.toByteArray(utf8))?.toString(utf8)
+                    val hdfsDirectory:String? = exhibit.getValue(cfc , FORENSIC_EXHIBIT_HDFS_EXHIBIT_DIRECTORY.toByteArray(utf8))?.toString(utf8)
+                    output.append("\t$exhibitId - Exhibit: Name = <$exhibitName>, Import Date = <$importDate>, HDFS Directory = <$hdfsDirectory>\n")
+                }
+
+            }
+            output.append("\n\n")
+            System.out.print(output.toString())
+            caseTable.close()
+            exhibitTable.close()
+        }
+    }
+
+    /**
      * Create a New Case. If the given ForensicCase already exists in database, the
      * existing case will be used.
      * Return a row key prefix that contains the case id and the exhibit id. This
      * row key prefix shall be used for importing data files and metadata
      */
-    fun createNewCase(forensicCase: ForensicCase, forensicExhibit: ForensicExhibit): String? {
-        getConnection()?.let { connection ->
-            val cases = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_CASE))
-            var caseId = getCaseId(forensicCase.caseNumber, cases)
+    fun createNewCase(forensicCase: ForensicCase): String? {
+        HBaseConnection.connection?.let { connection ->
+            val caseTable = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_CASE))
+            var caseId = getCaseId(forensicCase.caseNumber, caseTable)
             if (caseId != null) {
                 logger.info { "Forensic case with the case number = ${forensicCase.caseNumber} already exists! Add the evidence to this case." }
             } else {
                 logger.info { "Create a forensic case with content = $forensicCase" }
-                caseId = getNextFreeRowKey(cases)
-                cases.put(createPuts(forensicCase.toMap(), caseId))
+                caseId = getNextFreeRowKey(caseTable)
+                caseTable.put(createPuts(forensicCase.toMap(), caseId))
+                caseTable.close()
             }
-            logger.info { "Create a forensic evidence with content = $forensicExhibit" }
-            val exhibits = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_EXHIBIT))
-            val exhibitId = "${caseId}_${getNextFreeRowKey(exhibits)}"
+            logger.info { "Create a forensic evidence with content = ${forensicCase.forensicExhibit}" }
+            val exhibitTable = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_EXHIBIT))
+            val exhibitId = "${caseId}_${getNextFreeRowKey(exhibitTable)}"
             //update hdfs base directory and add the exhibit id to store large files in separate exhibit folders
-            val updatedExhibit = forensicExhibit.copy(hdfsBaseDirectory = forensicExhibit.hdfsBaseDirectory.resolve(exhibitId))
-            exhibits.put(createPuts(updatedExhibit.toMap(), exhibitId))
+            val updatedExhibit = forensicCase.forensicExhibit.copy(
+                    hdfsExhibitDirectory = forensicCase.forensicExhibit.hdfsExhibitDirectory.resolve(exhibitId))
+            exhibitTable.put(createPuts(updatedExhibit.toMap(), exhibitId))
+            exhibitTable.close()
             return exhibitId
         }
         return null
@@ -87,10 +131,10 @@ class ForensicCaseManager(private val getConnection: () -> Connection?) {
      * return the row id (case id) of this case, or null otherwise
      */
     private fun getCaseId(caseNumber: String, table: Table): String? {
-        val scanner = table.getScanner(COLUMN_FAMILY_NAME_COMMON.toByteArray(utf8), "caseNumber".toByteArray(utf8))
+        val scanner = table.getScanner(COLUMN_FAMILY_NAME_COMMON.toByteArray(utf8), FORENSIC_CASE_CASE_NUMBER.toByteArray(utf8))
         val result = scanner.find {
             it
-                    .getValue(COLUMN_FAMILY_NAME_COMMON.toByteArray(utf8), "caseNumber".toByteArray(utf8))
+                    .getValue(COLUMN_FAMILY_NAME_COMMON.toByteArray(utf8), FORENSIC_CASE_CASE_NUMBER.toByteArray(utf8))
                     .toString(utf8) == caseNumber
         }
         return result?.row?.toString(utf8)
@@ -121,7 +165,7 @@ class ForensicCaseManager(private val getConnection: () -> Connection?) {
      * Do nothing if the table already exists.
      */
     fun createTable(table: HTableDescriptor) {
-        getConnection()?.let { connection ->
+        HBaseConnection.connection?.let { connection ->
             connection.admin.use { admin ->
 
                 if (admin.tableExists(table.tableName)) {
@@ -141,7 +185,7 @@ class ForensicCaseManager(private val getConnection: () -> Connection?) {
      * If the table doesn't exist than do nothing.
      */
     fun deleteTable(tableName: String) {
-        getConnection()?.let { connection ->
+        HBaseConnection.connection?.let { connection ->
             connection.admin.use { admin ->
                 val forensicTableName = TableName.valueOf(tableName)
                 if (admin.tableExists(forensicTableName)) {

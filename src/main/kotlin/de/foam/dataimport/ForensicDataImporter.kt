@@ -1,12 +1,14 @@
 package de.foam.dataimport
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.convert
 import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import de.foam.dataimport.casemanagement.ForensicCase
+import de.foam.dataimport.casemanagement.ForensicCaseManager
 import de.foam.dataimport.casemanagement.ForensicExhibit
 import mu.KotlinLogging
 import java.nio.file.Files
@@ -40,11 +42,15 @@ private val logger = KotlinLogging.logger {}
 fun main(args: Array<String>) {
 
     // addSecurityKerberos()
-    ForensicDataImport().main(args)
+    ForensicDataImport().subcommands(Import(),Show()).main(args)
 
 }
 
-class ForensicDataImport : CliktCommand() {
+class ForensicDataImport : CliktCommand(){
+    override fun run() = Unit
+}
+
+class Import : CliktCommand(help = "Import a forensic exhibit") {
 
     private val verbose: Boolean by option("-v", "--verbose", help = "enable verbose mode").flag()
 
@@ -98,12 +104,16 @@ class ForensicDataImport : CliktCommand() {
      */
     private fun importDataVariantWithHbase() {
 
-        val forensicCase = ForensicCase(caseNumber
-                ?: UUID.randomUUID().toString(), caseName, examiner)
-        val forensicExhibit = ForensicExhibit(exhibitName, forensicCase.caseNumber, Date().toString(),
+        //Create a global HBASE Connection that will be used by other instances
+        val hbaseConnection = HBaseConnection()
+        hbaseConnection.createConnection(hbaseSiteXmlFile)
+
+        val forensicExhibit = ForensicExhibit(exhibitName, Date().toString(),
                 hdfsBaseDirectory ?: Paths.get(DEFAULT_HDFS_BASE_DIRECTORY))
-        val hdfsImport = HDFSDataImport(inputDirectory, forensicExhibit.hdfsBaseDirectory, hdfsCoreXmlFile)
-        val hbaseImport = HbaseDataImport(inputDirectory, hbaseSiteXmlFile, hdfsImport, forensicCase, forensicExhibit)
+        val forensicCase = ForensicCase(caseNumber?: UUID.randomUUID().toString(),
+                forensicExhibit,caseName, examiner)
+        val hdfsImport = HDFSDataImport(inputDirectory, forensicExhibit.hdfsExhibitDirectory, hdfsCoreXmlFile)
+        val hbaseImport = HbaseDataImport(inputDirectory, hdfsImport, forensicCase)
 
         logger.info { "Upload files into HBASE and HDFS. Use Case Number ${forensicCase.caseNumber} for data import!" }
         val rootDirectory = inputDirectory.toFile()
@@ -113,16 +123,35 @@ class ForensicDataImport : CliktCommand() {
                 .map { getFileMetadata(it, inputDirectory) }
                 .peek { it?.let { logger.trace { it } } }
                 .forEach { it?.let { hbaseImport.uploadFile(it) } }
+        hbaseImport.displayStatus()
 
         // Using Kotlin rootDir causes problems with symbolic link directories
         //rootDirectory.walk(FileWalkDirection.TOP_DOWN)
         //.onNext
 
         //free resources
-        hbaseImport.closeConnection()
         hdfsImport.closeConnection()
+        hbaseConnection.closeConnection()
     }
 }
+
+class Show : CliktCommand(help = "List forensic Cases") {
+
+    private val hbaseSiteXmlFile: Path? by option("-x", "--hbaseSiteXml",
+            help = "contains file path to hbase-site.xml configuration file. If not given use localhost:2181 for connecting to Zookeeper").convert { Paths.get(it) }
+
+    override fun run() {
+        logger.info { "Manage Forensic Cases" }
+        //Create a global HBASE Connection that will be used by other instances
+        val hbaseConnection = HBaseConnection()
+        hbaseConnection.createConnection(hbaseSiteXmlFile)
+
+        val forensicCaseManager = ForensicCaseManager()
+        forensicCaseManager.displayCasesAndExhibits()
+        hbaseConnection.closeConnection()
+    }
+}
+
 
 /**
  * This method will set common Kerberos configurations.
