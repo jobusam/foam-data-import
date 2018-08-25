@@ -65,7 +65,7 @@ class ForensicCaseManager(private val getConnection: () -> Connection?) {
             val cases = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_CASE))
             var caseId = getCaseId(forensicCase.caseNumber, cases)
             if (caseId != null) {
-                logger.info { "A forensic case with the case number = ${forensicCase.caseNumber} already exists! Add the evidence to this case." }
+                logger.info { "Forensic case with the case number = ${forensicCase.caseNumber} already exists! Add the evidence to this case." }
             } else {
                 logger.info { "Create a forensic case with content = $forensicCase" }
                 caseId = getNextFreeRowKey(cases)
@@ -74,7 +74,9 @@ class ForensicCaseManager(private val getConnection: () -> Connection?) {
             logger.info { "Create a forensic evidence with content = $forensicExhibit" }
             val exhibits = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_EXHIBIT))
             val exhibitId = "${caseId}_${getNextFreeRowKey(exhibits)}"
-            exhibits.put(createPuts(forensicExhibit.toMap(), exhibitId))
+            //update hdfs base directory and add the exhibit id to store large files in separate exhibit folders
+            val updatedExhibit = forensicExhibit.copy(hdfsBaseDirectory = forensicExhibit.hdfsBaseDirectory.resolve(exhibitId))
+            exhibits.put(createPuts(updatedExhibit.toMap(), exhibitId))
             return exhibitId
         }
         return null

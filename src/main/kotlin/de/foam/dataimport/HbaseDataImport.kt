@@ -98,7 +98,9 @@ class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?,
         logger.info { "Create Tables in HBASE" }
         createTables()
 
-        rowPrefix = caseManager.createNewCase(forensicCase,forensicExhibit) ?: ""
+        val exhibitId = caseManager.createNewCase(forensicCase,forensicExhibit) ?: ""
+        rowPrefix = exhibitId
+        hdfsDataImport.createHDFSExhibitDiretory(exhibitId)
     }
 
     /**
@@ -170,7 +172,7 @@ class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?,
                 fileContentsInHdfs.incrementAndGet()
                 map.plus(Put(rowKey.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
                         "hdfsFilePath".toByteArray(utf8),
-                        hdfsDataImport.getHDFSBaseDirectory().resolve(rowKey).toString().toByteArray(utf8)))
+                        hdfsDataImport.getHDFSExhibitDirectory().resolve(rowKey).toString().toByteArray(utf8)))
             }
         }
         return map
