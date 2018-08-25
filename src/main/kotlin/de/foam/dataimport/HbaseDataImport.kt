@@ -104,14 +104,6 @@ class HbaseDataImport(private val inputDirectory: Path, private val hdfsDataImpo
     }
 
     /**
-     * Delete Tables for forensic case management and file storage (incl. metadata) in HBASE.
-     */
-    fun deleteTables() {
-        caseManager.deleteForensicCaseManagementTables()
-        caseManager.deleteTable(TABLE_NAME_FORENSIC_DATA)
-    }
-
-    /**
      * Upload a single file content and the given metadata into HBASE. If the file is
      * very small (smaller than 10 MB ,see isSmallFile() method) than upload the file content directly
      * into HBASE table. Otherwise upload the large file content into HDFS.

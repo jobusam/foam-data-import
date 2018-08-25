@@ -8,7 +8,7 @@ import org.apache.hadoop.hbase.client.HBaseAdmin
 import java.net.URL
 import java.nio.file.Path
 
-internal class HBaseConnection (){
+internal class HBaseConnection (hbaseSiteXML: Path?){
 
     private val logger = KotlinLogging.logger {}
 
@@ -16,8 +16,12 @@ internal class HBaseConnection (){
         var connection: Connection? = null
     }
 
+    init {
+        createConnection(hbaseSiteXML)
+    }
+
     fun createConnection(hbaseSiteXML: Path?) {
-        logger.info { "Try to connect to HBASE..." }
+        logger.info { "Connect to HBASE..." }
         val url: URL? = hbaseSiteXML?.toUri()?.toURL()
                 ?: HbaseDataImport::class.java.getResource("/hbase-site-client.xml")
         url?.let {
@@ -30,6 +34,7 @@ internal class HBaseConnection (){
     }
 
     fun closeConnection(){
+        logger.info { "Close Connection to HBASE" }
         connection?.close()
         connection = null
     }

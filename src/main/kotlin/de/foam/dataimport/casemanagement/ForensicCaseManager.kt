@@ -1,6 +1,7 @@
 package de.foam.dataimport.casemanagement
 
 import de.foam.dataimport.HBaseConnection
+import de.foam.dataimport.TABLE_NAME_FORENSIC_DATA
 import mu.KotlinLogging
 import org.apache.hadoop.hbase.HColumnDescriptor
 import org.apache.hadoop.hbase.HTableDescriptor
@@ -47,18 +48,9 @@ class ForensicCaseManager() {
     }
 
     /**
-     * Delete the HBASE tables "forensicCase" and "forensicExhibit"
-     */
-    fun deleteForensicCaseManagementTables() {
-        deleteTable(TABLE_NAME_FORENSIC_CASE)
-        deleteTable(TABLE_NAME_FORENSIC_EXHIBIT)
-    }
-
-    /**
      * Display all created cases and imported Exhibits
      */
     fun displayCasesAndExhibits() {
-
         HBaseConnection.connection?.let { connection ->
             val caseTable = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_CASE))
             val exhibitTable = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_EXHIBIT))
@@ -68,6 +60,7 @@ class ForensicCaseManager() {
             val cfc = COLUMN_FAMILY_NAME_COMMON.toByteArray(utf8)
 
             val output = StringBuilder()
+            output.append("\nList of available Forensic Cases and Exhibits:")
 
             cases.forEach { case ->
                 val caseId = case.row.toString(utf8)
@@ -77,6 +70,7 @@ class ForensicCaseManager() {
 
                 output.append("\n\n$caseId - Case: Number = <$caseNumber>, Name = <$caseName>, Examiner = <$examiner>\n")
 
+                //FIXME: Try to cache the exhibit results and don't request it every case!
                 exhibitTable.getScanner(Scan()).filter { exhibit ->
                     exhibit.row.toString(utf8).startsWith(case.row.toString(utf8))
                 }.forEach { exhibit ->
@@ -178,6 +172,28 @@ class ForensicCaseManager() {
                 }
             }
         }
+    }
+
+    fun getAllHdfsDirectories():List<String>{
+        HBaseConnection.connection?.let { connection ->
+            val exhibitTable = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_EXHIBIT))
+            val scanner = exhibitTable.getScanner(COLUMN_FAMILY_NAME_COMMON.toByteArray(utf8),
+                    FORENSIC_EXHIBIT_HDFS_EXHIBIT_DIRECTORY.toByteArray(utf8))
+            return scanner.map {
+                it.getValue(COLUMN_FAMILY_NAME_COMMON.toByteArray(utf8), FORENSIC_EXHIBIT_HDFS_EXHIBIT_DIRECTORY.toByteArray(utf8))
+                        .toString(utf8)
+            }
+        }
+        return listOf()
+    }
+
+    /**
+     * Delete all cases and exhibits.
+     */
+    fun deleteForensicData() {
+        deleteTable(TABLE_NAME_FORENSIC_DATA)
+        deleteTable(TABLE_NAME_FORENSIC_CASE)
+        deleteTable(TABLE_NAME_FORENSIC_EXHIBIT)
     }
 
     /**

@@ -42,7 +42,7 @@ private val logger = KotlinLogging.logger {}
 fun main(args: Array<String>) {
 
     // addSecurityKerberos()
-    ForensicDataImport().subcommands(Import(),Show()).main(args)
+    ForensicDataImport().subcommands(Import(),Show(), DeleteAll()).main(args)
 
 }
 
@@ -105,24 +105,24 @@ class Import : CliktCommand(help = "Import a forensic exhibit") {
     private fun importDataVariantWithHbase() {
 
         //Create a global HBASE Connection that will be used by other instances
-        val hbaseConnection = HBaseConnection()
-        hbaseConnection.createConnection(hbaseSiteXmlFile)
+        val hbaseConnection = HBaseConnection(hbaseSiteXmlFile)
+        val hdfsConnection = HdfsConnection(hdfsCoreXmlFile)
 
         val forensicExhibit = ForensicExhibit(exhibitName, Date().toString(),
                 hdfsBaseDirectory ?: Paths.get(DEFAULT_HDFS_BASE_DIRECTORY))
         val forensicCase = ForensicCase(caseNumber?: UUID.randomUUID().toString(),
                 forensicExhibit,caseName, examiner)
-        val hdfsImport = HDFSDataImport(inputDirectory, forensicExhibit.hdfsExhibitDirectory, hdfsCoreXmlFile)
+        val hdfsImport = HDFSDataImport(inputDirectory, forensicExhibit.hdfsExhibitDirectory)
         val hbaseImport = HbaseDataImport(inputDirectory, hdfsImport, forensicCase)
 
         logger.info { "Upload files into HBASE and HDFS. Use Case Number ${forensicCase.caseNumber} for data import!" }
         val rootDirectory = inputDirectory.toFile()
         Files.walk(rootDirectory.toPath())
                 .parallel() //Keep in mind this can cause other problems (see https://dzone.com/articles/think-twice-using-java-8)
-                .peek { it?.let { logger.trace { it } } }
+                .peek { logger.trace { it }  }
                 .map { getFileMetadata(it, inputDirectory) }
-                .peek { it?.let { logger.trace { it } } }
-                .forEach { it?.let { hbaseImport.uploadFile(it) } }
+                .peek { logger.trace { it } }
+                .forEach { it?.let { file -> hbaseImport.uploadFile(file) } }
         hbaseImport.displayStatus()
 
         // Using Kotlin rootDir causes problems with symbolic link directories
@@ -130,7 +130,7 @@ class Import : CliktCommand(help = "Import a forensic exhibit") {
         //.onNext
 
         //free resources
-        hdfsImport.closeConnection()
+        hdfsConnection.closeConnection()
         hbaseConnection.closeConnection()
     }
 }
@@ -143,11 +143,48 @@ class Show : CliktCommand(help = "List forensic Cases") {
     override fun run() {
         logger.info { "Manage Forensic Cases" }
         //Create a global HBASE Connection that will be used by other instances
-        val hbaseConnection = HBaseConnection()
-        hbaseConnection.createConnection(hbaseSiteXmlFile)
+        val hbaseConnection = HBaseConnection(hbaseSiteXmlFile)
+        val forensicCaseManager = ForensicCaseManager()
+        //create tables if they are not available
+        forensicCaseManager.createForensicCaseManagementTables()
+
+        forensicCaseManager.displayCasesAndExhibits()
+        hbaseConnection.closeConnection()
+    }
+}
+
+class DeleteAll : CliktCommand(help = "Delete all imported forensic exhibits") {
+
+    private val hbaseSiteXmlFile: Path? by option("-x", "--hbaseSiteXml",
+            help = "contains file path to hbase-site.xml configuration file. If not given use localhost:2181 for connecting to Zookeeper").convert { Paths.get(it) }
+
+
+    private val hdfsCoreXmlFile: Path? by option("-y", "--hdfsCoreXml",
+            help = "contains file path to Hadoop core-site.xml configuration file. If not given use default hdfs uri hdfs://localhost:9000").convert { Paths.get(it) }
+
+
+    override fun run() {
+        logger.info { "Delete All Forensic Cases" }
+        //Create a global HBASE Connection that will be used by other instances
+        val hbaseConnection = HBaseConnection(hbaseSiteXmlFile)
+        val hdfsConnection = HdfsConnection(hdfsCoreXmlFile)
 
         val forensicCaseManager = ForensicCaseManager()
-        forensicCaseManager.displayCasesAndExhibits()
+
+        //create tables if they are not available
+        forensicCaseManager.createForensicCaseManagementTables()
+
+        forensicCaseManager.getAllHdfsDirectories()
+                .map{org.apache.hadoop.fs.Path(it)}
+                .forEach {
+                    logger.info { "Delete HDFS Directory <$it>" }
+                    HdfsConnection.filesystem?.delete(it,true)
+                }
+
+        forensicCaseManager.deleteForensicData()
+
+        //filesystem?.delete(, true)
+        hdfsConnection.closeConnection()
         hbaseConnection.closeConnection()
     }
 }
