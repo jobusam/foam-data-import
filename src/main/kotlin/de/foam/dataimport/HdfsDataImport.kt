@@ -1,4 +1,4 @@
-package de.foam.data.import
+package de.foam.dataimport
 
 import mu.KotlinLogging
 import org.apache.hadoop.conf.Configuration

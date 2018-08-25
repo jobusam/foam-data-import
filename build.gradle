@@ -1,5 +1,5 @@
 buildscript {
-    ext.kotlin_version = '1.2.51'
+    ext.kotlin_version = '1.2.61'
 
     repositories {
         mavenCentral()
@@ -22,7 +22,7 @@ repositories {
 
 dependencies {
     // Common dependencies
-    compile "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
+    compile "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 
     // For Logging
     compile 'io.github.microutils:kotlin-logging:1.4.9'
@@ -36,10 +36,11 @@ dependencies {
 
     // Variant "Upload to HBASE"
     // Keep in mind:
-    // On HDP 2.6.5 HBASE 1.1.2 and HADOOP 2.7.3 is used.
+    // On HDP 2.6.5 and  HADOOP 2.7.3 HBASE 1.1.2 is used.
     // On local instance HBASE 1.1.2/2.1.0 and Hadoop 3.1.0 is used.
     // Both deployments work with following versions. But maybe in future the versions must be updated.
-    compile 'org.apache.hbase:hbase-client:1.4.3'
+//    compile 'org.apache.hbase:hbase-client:1.4.3'
+    compile 'org.apache.hbase:hbase-client:1.1.2'
     compile 'org.apache.hadoop:hadoop-client:3.0.0'
 
     //For Testing
@@ -47,7 +48,7 @@ dependencies {
 
 }
 
-mainClassName = 'de.foam.data.import.ForensicDataImporterKt'
+mainClassName = 'de.foam.dataimport.ForensicDataImporterKt'
 
 // Following configuration is necessary to use slf4j-simple only.
 // Because hbase-client wants to use slf4j-log4j12!

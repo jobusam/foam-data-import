@@ -1,4 +1,4 @@
-package de.foam.data.import
+package de.foam.dataimport
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
@@ -6,12 +6,13 @@ import com.github.ajalt.clikt.parameters.arguments.convert
 import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
-import com.github.ajalt.clikt.parameters.types.int
+import de.foam.dataimport.casemanagement.ForensicCase
+import de.foam.dataimport.casemanagement.ForensicExhibit
 import mu.KotlinLogging
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import java.util.Arrays
+import java.util.*
 import javax.security.auth.login.AppConfigurationEntry
 import javax.security.auth.login.Configuration
 import kotlin.collections.HashMap
@@ -39,7 +40,6 @@ private val logger = KotlinLogging.logger {}
 fun main(args: Array<String>) {
 
     // addSecurityKerberos()
-    // dataImportVariantWithCLICommand(args)
     ForensicDataImport().main(args)
 
 }
@@ -57,14 +57,20 @@ class ForensicDataImport : CliktCommand() {
     private val hbaseSiteXmlFile: Path? by option("-x", "--hbaseSiteXml",
             help = "contains file path to hbase-site.xml configuration file. If not given use localhost:2181 for connecting to Zookeeper").convert { Paths.get(it) }
 
-    private val hdfsSiteXmlFile: Path? by option("-y", "--hdfsSiteXml",
+    private val hdfsCoreXmlFile: Path? by option("-y", "--hdfsCoreXml",
             help = "contains file path to Hadoop core-site.xml configuration file. If not given use default hdfs uri hdfs://localhost:9000").convert { Paths.get(it) }
 
-    private val caseNumber: Int? by option("-c", "--caseNumber",
-            help = "To which case this evidence belongs").int()
+    private val caseNumber: String? by option("-c", "--caseNumber",
+            help = "To which case this exhibit belongs")
+
+    private val caseName: String? by option("-d", "--caseName",
+            help = "Descriptive name of the case")
 
     private val examiner: String? by option("-e", "--examiner",
             help = "The name of the examiner")
+
+    private val exhibitName: String? by option ("-f","--exhibitName",
+            help = "The name of the exhibit (e.g: Windows System Image")
 
     override fun run() {
         logger.info { "Starting Forensic Data Import..." }
@@ -73,9 +79,11 @@ class ForensicDataImport : CliktCommand() {
                     "inputDirectory = $inputDirectory\n " +
                     "hdfsBaseDirectory = $hdfsBaseDirectory (optional)\n " +
                     "HBASE configuration path = $hbaseSiteXmlFile (optional)\n " +
-                    "HDFS configuration path = $hdfsSiteXmlFile (optional)\n " +
+                    "HDFS configuration path = $hdfsCoreXmlFile (optional)\n " +
                     "Examiner = $examiner (optional)\n " +
                     "Case Number = $caseNumber (optional)\n " +
+                    "Case Name = $caseName (optional)\n " +
+                    "Exhibit Name = $exhibitName (optional)\n " +
                     "Verbose = $verbose (optional)\n "
         }
         importDataVariantWithHbase()
@@ -90,14 +98,14 @@ class ForensicDataImport : CliktCommand() {
      */
     private fun importDataVariantWithHbase() {
 
-        val hdfsImport = HDFSDataImport(inputDirectory, hdfsBaseDirectory
-                ?: Paths.get(DEFAULT_HDFS_BASE_DIRECTORY), hdfsSiteXmlFile)
-        val hbaseImport = HbaseDataImport(inputDirectory, hbaseSiteXmlFile, hdfsImport)
+        val forensicCase = ForensicCase(caseNumber
+                ?: UUID.randomUUID().toString(), caseName, examiner)
+        val forensicExhibit = ForensicExhibit(exhibitName, forensicCase.caseNumber, Date().toString(),
+                hdfsBaseDirectory ?: Paths.get(DEFAULT_HDFS_BASE_DIRECTORY))
+        val hdfsImport = HDFSDataImport(inputDirectory, forensicExhibit.hdfsBaseDirectory, hdfsCoreXmlFile)
+        val hbaseImport = HbaseDataImport(inputDirectory, hbaseSiteXmlFile, hdfsImport, forensicCase, forensicExhibit)
 
-        logger.info { "Create Tables in HBASE" }
-        hbaseImport.createTables()
-
-        logger.info { "Upload files into HBASE and HDFS" }
+        logger.info { "Upload files into HBASE and HDFS. Use Case Number ${forensicCase.caseNumber} for data import!" }
         val rootDirectory = inputDirectory.toFile()
         Files.walk(rootDirectory.toPath())
                 .parallel() //Keep in mind this can cause other problems (see https://dzone.com/articles/think-twice-using-java-8)
@@ -144,57 +152,4 @@ fun addSecurityKerberos() {
             return Arrays.asList(configEntry).toTypedArray()
         }
     })
-}
-
-
-/**
- * Upload data into local HDFS. Use shell "hdfs" command for upload files and metadata.
- * See class HdfsImportCli for further details on this implementation
- */
-fun dataImportVariantWithCLICommand(args: Array<String>) {
-
-    val inputDirectory: Path
-    val hdfsDirectoryPath: Path
-    val hadoopHome: Path?
-    when (args.size) {
-        2 -> {
-            inputDirectory = Paths.get(args[0])
-            hdfsDirectoryPath = Paths.get(args[1])
-            hadoopHome = null
-        }
-        3 -> {
-            inputDirectory = Paths.get(args[0])
-            hdfsDirectoryPath = Paths.get(args[1])
-            hadoopHome = Paths.get(args[2])
-        }
-        else -> {
-            logger.error {
-                "Wrong arguments! Follow syntax is provided:\n" +
-                        "LOCAL_SOURCE_DIR HDFS_TARGET_DIR [HDFS_HOME]\n" +
-                        "Use absolute paths for all arguments. "
-            }
-            return
-        }
-    }
-
-    logger.info {
-        "Data from input data directory <$inputDirectory>" +
-                " will be uploaded to hdfs target directory <$hdfsDirectoryPath>"
-    }
-
-    val hdfsImportCli = HdfsImportCli(hadoopHome, hdfsDirectoryPath, inputDirectory)
-
-    val uploaded = hdfsImportCli.uploadContentToHDFS()
-    if (!uploaded) {
-        logger.error { "File upload of directory $inputDirectory failed. Stop Forensic Data Import!" }
-        return
-    }
-
-    val rootDirectory = inputDirectory.toFile()
-    rootDirectory.walk(FileWalkDirection.TOP_DOWN)
-            .map { getFileMetadata(it.toPath(), inputDirectory) }
-            .onEach { it?.let { logger.trace { it } } }
-            .forEach { it?.let { hdfsImportCli.uploadFileMetadata(it) } }
-
-    hdfsImportCli.waitForExecution()
 }

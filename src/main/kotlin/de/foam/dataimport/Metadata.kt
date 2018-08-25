@@ -1,4 +1,4 @@
-package de.foam.data.import
+package de.foam.dataimport
 
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -29,7 +29,7 @@ data class FileMetadata(val relativeFilePath: String, val fileType: FileType, va
     fun toMap(): Map<String,String>{
         // TODO: review! Maybe it's better to don't return optional values!
         val values = mutableMapOf<String,String>()
-        values["relativeFilePath"] = this.relativeFilePath
+        values["filePath"] = this.relativeFilePath
         values["fileType"] = this.fileType.toString()
         values["fileSize"] = this.fileSize?.toString() ?: ""
         values["owner"] = this.owner

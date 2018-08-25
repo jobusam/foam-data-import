@@ -1,8 +1,11 @@
-package de.foam.data.import
+package de.foam.dataimport.variant2
 
 import com.google.gson.Gson
+import de.foam.dataimport.FileMetadata
+import de.foam.dataimport.getFileMetadata
 import mu.KotlinLogging
 import java.nio.file.Path
+import java.nio.file.Paths
 import java.util.*
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
@@ -43,6 +46,69 @@ import java.util.concurrent.Future
  * This variant needs a loot of time for upload and doesn't work correctly with symbolic links!
  *
  */
+
+/**
+ * Use kotlin-logging (Micro-Utils).
+ * Define log level in simplelogger.properties files (see resources)
+ */
+private val logger = KotlinLogging.logger {}
+
+fun main(args: Array<String>) {
+    dataImportVariantWithCLICommand(args)
+}
+
+/**
+ * Upload data into local HDFS. Use shell "hdfs" command for upload files and metadata.
+ * See class HdfsImportCli for further details on this implementation
+ */
+fun dataImportVariantWithCLICommand(args: Array<String>) {
+
+    val inputDirectory: Path
+    val hdfsDirectoryPath: Path
+    val hadoopHome: Path?
+    when (args.size) {
+        2 -> {
+            inputDirectory = Paths.get(args[0])
+            hdfsDirectoryPath = Paths.get(args[1])
+            hadoopHome = null
+        }
+        3 -> {
+            inputDirectory = Paths.get(args[0])
+            hdfsDirectoryPath = Paths.get(args[1])
+            hadoopHome = Paths.get(args[2])
+        }
+        else -> {
+            logger.error {
+                "Wrong arguments! Follow syntax is provided:\n" +
+                        "LOCAL_SOURCE_DIR HDFS_TARGET_DIR [HDFS_HOME]\n" +
+                        "Use absolute paths for all arguments. "
+            }
+            return
+        }
+    }
+
+    logger.info {
+        "Data from input data directory <$inputDirectory>" +
+                " will be uploaded to hdfs target directory <$hdfsDirectoryPath>"
+    }
+
+    val hdfsImportCli = HdfsImportCli(hadoopHome, hdfsDirectoryPath, inputDirectory)
+
+    val uploaded = hdfsImportCli.uploadContentToHDFS()
+    if (!uploaded) {
+        logger.error { "File upload of directory $inputDirectory failed. Stop Forensic Data Import!" }
+        return
+    }
+
+    val rootDirectory = inputDirectory.toFile()
+    rootDirectory.walk(FileWalkDirection.TOP_DOWN)
+            .map { getFileMetadata(it.toPath(), inputDirectory) }
+            .onEach { it?.let { logger.trace { it } } }
+            .forEach { it?.let { hdfsImportCli.uploadFileMetadata(it) } }
+
+    hdfsImportCli.waitForExecution()
+}
+
 class HdfsImportCli(
         private val hadoopHome: Path?,
         private val hdfsTargetDirectory: Path,

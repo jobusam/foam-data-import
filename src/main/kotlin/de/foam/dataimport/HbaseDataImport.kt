@@ -1,16 +1,22 @@
-package de.foam.data.import
+package de.foam.dataimport
 
+import de.foam.dataimport.casemanagement.ForensicCase
+import de.foam.dataimport.casemanagement.ForensicCaseManager
+import de.foam.dataimport.casemanagement.ForensicExhibit
 import mu.KotlinLogging
 import org.apache.hadoop.hbase.HBaseConfiguration
 import org.apache.hadoop.hbase.HColumnDescriptor
 import org.apache.hadoop.hbase.HTableDescriptor
 import org.apache.hadoop.hbase.TableName
-import org.apache.hadoop.hbase.client.*
+import org.apache.hadoop.hbase.client.Connection
+import org.apache.hadoop.hbase.client.ConnectionFactory
+import org.apache.hadoop.hbase.client.HBaseAdmin
+import org.apache.hadoop.hbase.client.Put
 import org.apache.hadoop.hbase.io.compress.Compression
-import java.nio.file.Path
 import java.net.URL
 import java.nio.charset.Charset
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -53,16 +59,22 @@ const val TABLE_NAME_FORENSIC_DATA = "forensicData"
 const val COLUMN_FAMILY_NAME_CONTENT = "content"
 const val COLUMN_FAMILY_NAME_METADATA = "metadata"
 
-class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?, private val hdfsDataImport: HDFSDataImport) {
+class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?,
+                      private val hdfsDataImport: HDFSDataImport,
+                      forensicCase: ForensicCase, forensicExhibit: ForensicExhibit) {
 
     private val logger = KotlinLogging.logger {}
     private val utf8 = Charset.forName("utf-8")
     private var connection: Connection? = null
 
+    private val rowPrefix:String
     private val rowCount = AtomicInteger()
+
     // for statistics only
     private val fileContentsInHbase = AtomicInteger()
     private val fileContentsInHdfs = AtomicInteger()
+
+    private val caseManager = ForensicCaseManager { connection }
 
 
     /**
@@ -73,7 +85,8 @@ class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?, pri
      */
     init {
         logger.info { "Try to connect to HBASE..." }
-        val url: URL? = hbaseSiteXML?.toUri()?.toURL() ?: HbaseDataImport::class.java.getResource("/hbase-site-client.xml")
+        val url: URL? = hbaseSiteXML?.toUri()?.toURL()
+                ?: HbaseDataImport::class.java.getResource("/hbase-site-client.xml")
         url?.let {
             logger.info { "Use configuration file $url" }
             val config = HBaseConfiguration.create()
@@ -81,40 +94,36 @@ class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?, pri
             HBaseAdmin.checkHBaseAvailable(config)
             connection = ConnectionFactory.createConnection(config)
         }
+
+        logger.info { "Create Tables in HBASE" }
+        createTables()
+
+        rowPrefix = caseManager.createNewCase(forensicCase,forensicExhibit) ?: ""
     }
 
     /**
-     * Delete old table with old content (if any exists)
-     * and create a new table without content
+     * Create Tables for forensic case management and file storage (incl. metadata) in HBASE.
      */
-    private fun createOrOverwrite(admin: Admin, table: HTableDescriptor) {
-        if (admin.tableExists(table.tableName)) {
-            if (admin.isTableEnabled(table.tableName)) {
-                admin.disableTable(table.tableName)
-            }
-            admin.deleteTable(table.tableName)
-        }
-        admin.createTable(table)
+    private fun createTables() {
+        caseManager.createForensicCaseManagementTables()
+        caseManager.createTable(createForensicDataTableDescriptor())
+    }
+
+    private fun createForensicDataTableDescriptor(): HTableDescriptor {
+        val table = HTableDescriptor(TableName.valueOf(TABLE_NAME_FORENSIC_DATA))
+        table.addFamily(HColumnDescriptor(COLUMN_FAMILY_NAME_METADATA)
+                // Set the replication scope to 1 is very important for replicate data with hbase-indexer to solr!
+                .setCompressionType(Compression.Algorithm.NONE).setScope(1))
+        table.addFamily(HColumnDescriptor(COLUMN_FAMILY_NAME_CONTENT).setCompressionType(Compression.Algorithm.NONE))
+        return table
     }
 
     /**
-     * Create Tables for persisting files and file metadata in HBASE and HDFS
+     * Delete Tables for forensic case management and file storage (incl. metadata) in HBASE.
      */
-    fun createTables() {
-        connection?.let { connection ->
-            connection.admin.use { admin ->
-
-                val table = HTableDescriptor(TableName.valueOf(TABLE_NAME_FORENSIC_DATA))
-                table.addFamily(HColumnDescriptor(COLUMN_FAMILY_NAME_METADATA)
-                        // Set the replication scope to 1 is very important for replicate data with hbase-indexer to solr!
-                        .setCompressionType(Compression.Algorithm.NONE).setScope(1))
-                table.addFamily(HColumnDescriptor(COLUMN_FAMILY_NAME_CONTENT).setCompressionType(Compression.Algorithm.NONE))
-
-                logger.debug { "Creating table $table in HBASE" }
-                createOrOverwrite(admin, table)
-                logger.trace { "Finished creation of table $table done" }
-            }
-        }
+    fun deleteTables() {
+        caseManager.deleteForensicCaseManagementTables()
+        caseManager.deleteTable(TABLE_NAME_FORENSIC_DATA)
     }
 
     /**
@@ -126,12 +135,12 @@ class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?, pri
         connection?.let { connection ->
             logger.trace { "Upload Metadata of file ${inputDirectory.resolve(fileMetadata.relativeFilePath)}" }
             val table = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_DATA))
-            val row = "row" + rowCount.getAndIncrement()
-            table.put(createPuts(fileMetadata, row))
+            val rowKey = "${rowPrefix}_${rowCount.getAndIncrement()}"
+            table.put(createPuts(fileMetadata, rowKey))
 
             if (FileType.DATA_FILE == fileMetadata.fileType && !isSmallFile(fileMetadata)) {
                 // Use row index of hbase entry as file name for raw file content
-                hdfsDataImport.uploadFileIntoHDFS(fileMetadata.relativeFilePath, row)
+                hdfsDataImport.uploadFileIntoHDFS(fileMetadata.relativeFilePath, rowKey)
             }
         }
     }
@@ -139,11 +148,11 @@ class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?, pri
     /**
      * create Put objects to import every metadata into a single column
      */
-    private fun createPuts(fileMetadata: FileMetadata, row: String): List<Put> {
+    private fun createPuts(fileMetadata: FileMetadata, rowKey: String): List<Put> {
 
 
         val map = fileMetadata.toMap().map {
-            Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_METADATA.toByteArray(utf8),
+            Put(rowKey.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_METADATA.toByteArray(utf8),
                     it.key.toByteArray(utf8),
                     it.value.toByteArray(utf8))
         }
@@ -152,16 +161,16 @@ class HbaseDataImport(private val inputDirectory: Path, hbaseSiteXML: Path?, pri
             return if (isSmallFile(fileMetadata)) {
                 fileContentsInHbase.incrementAndGet()
                 val absolutePath = inputDirectory.resolve(fileMetadata.relativeFilePath)
-                map.plus(Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
+                map.plus(Put(rowKey.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
                         "fileContent".toByteArray(utf8),
                         Files.readAllBytes(absolutePath)))
             } else {
                 //It's a large file. Therefore only save a file path in the database column "hdfsFilePath"
                 // Additionally the row index will be used as file name for the raw content in hdfs!
                 fileContentsInHdfs.incrementAndGet()
-                map.plus(Put(row.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
+                map.plus(Put(rowKey.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
                         "hdfsFilePath".toByteArray(utf8),
-                        hdfsDataImport.getHDFSBaseDirectory().resolve(row).toString().toByteArray(utf8)))
+                        hdfsDataImport.getHDFSBaseDirectory().resolve(rowKey).toString().toByteArray(utf8)))
             }
         }
         return map
