@@ -168,6 +168,7 @@ class ForensicCaseManager() {
                     logger.debug { "Creating table ${table.tableName} in HBASE" }
 
                     admin.createTable(table)
+                    //FIXME: Use another createTable method to provide a region split!
                     logger.debug { "Finished creation of table ${table.tableName}" }
                 }
             }

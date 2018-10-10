@@ -1,5 +1,7 @@
 package de.foam.dataimport
 
+import mu.KotlinLogging
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
@@ -57,6 +59,8 @@ data class FileTimestamps(
 
 enum class FileType { DATA_FILE, DIRECTORY, SYMBOLIC_LINK, OTHER }
 
+private val logger = KotlinLogging.logger {}
+
 /**
  * Retrieve file metadata from given filePath like owner, group, permissions and timestamps.
  * Keep in mind file timestamps should be always defined in UTC Timezone!
@@ -64,28 +68,33 @@ enum class FileType { DATA_FILE, DIRECTORY, SYMBOLIC_LINK, OTHER }
 fun getFileMetadata(filePath: Path, inputDirectory: Path): FileMetadata? {
     // Don't follow symbolic links! (e.g. symbolic link can link to an file oustide the mounted/given image and it's not guaranteed that this linked file exists!
     // see file /etc/cups/ssl/server.crt in ubuntu image v.1.0 -> the file itself is an symbolic link and the target file doesn't exist anymore!
-    val posixAttributes = Files.getFileAttributeView(filePath, PosixFileAttributeView::class.java,LinkOption.NOFOLLOW_LINKS)?.readAttributes()
-    val fileType = when {
-        Files.isSymbolicLink(filePath) -> FileType.SYMBOLIC_LINK
-        Files.isRegularFile(filePath) -> FileType.DATA_FILE
-        Files.isDirectory(filePath) -> FileType.DIRECTORY
-        else -> FileType.OTHER
-    }
+
+    try {
+        val posixAttributes = Files.getFileAttributeView(filePath, PosixFileAttributeView::class.java, LinkOption.NOFOLLOW_LINKS)?.readAttributes()
+        val fileType = when {
+            Files.isSymbolicLink(filePath) -> FileType.SYMBOLIC_LINK
+            Files.isRegularFile(filePath) -> FileType.DATA_FILE
+            Files.isDirectory(filePath) -> FileType.DIRECTORY
+            else -> FileType.OTHER
+        }
 
 
-    posixAttributes?.let {
+        posixAttributes?.let {
 
-        val timestamps = FileTimestamps(posixAttributes.lastModifiedTime().toString(),
-                lastAccessed = posixAttributes.lastAccessTime().toString(),
-                created = posixAttributes.creationTime().toString())
-        return FileMetadata(
-                inputDirectory.relativize(filePath).toString(),
-                fileType,
-                posixAttributes.size(),
-                posixAttributes.owner().toString(),
-                posixAttributes.group().toString(),
-                posixAttributes.permissions().toString(),
-                timestamps)
+            val timestamps = FileTimestamps(posixAttributes.lastModifiedTime().toString(),
+                    lastAccessed = posixAttributes.lastAccessTime().toString(),
+                    created = posixAttributes.creationTime().toString())
+            return FileMetadata(
+                    inputDirectory.relativize(filePath).toString(),
+                    fileType,
+                    posixAttributes.size(),
+                    posixAttributes.owner().toString(),
+                    posixAttributes.group().toString(),
+                    posixAttributes.permissions().toString(),
+                    timestamps)
+        }
+    }catch (e: IOException){
+        logger.error(e){"Can't read metadata of file $filePath"}
     }
     return null
 }

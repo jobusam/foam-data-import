@@ -1,6 +1,8 @@
 package de.foam.dataimport
 
 import mu.KotlinLogging
+import org.apache.hadoop.fs.FSError
+import java.io.IOException
 import java.nio.file.Path
 
 /**
@@ -34,8 +36,14 @@ class HDFSDataImport(private val inputDirectory: Path, private val hdfsBaseDirec
         val inputFilePath = org.apache.hadoop.fs.Path(inputDirectory.resolve(relativeFilePath).toUri())
         val targetHDFSFilePath = org.apache.hadoop.fs.Path((hdfsExhibitDirectory
                 ?: hdfsBaseDirectory).resolve(targetFileName).toString())
-        HdfsConnection.filesystem?.copyFromLocalFile(inputFilePath, targetHDFSFilePath)
         logger.trace { "HDFS Upload <$inputFilePath> to HDFS:$targetHDFSFilePath" }
+        try {
+            HdfsConnection.filesystem?.copyFromLocalFile(inputFilePath, targetHDFSFilePath)
+        } catch (e: IOException){
+            logger.error { " IOException: Can't upload file <$inputFilePath> to HDFS:$targetHDFSFilePath" }
+        } catch (fsError: FSError){
+            logger.error { "FS Error: Can't upload file <$inputFilePath> to HDFS:$targetHDFSFilePath" }
+        }
     }
 
     fun createHDFSExhibitDiretory(exhibitID: String) {
