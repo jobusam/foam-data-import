@@ -53,6 +53,11 @@ const val TABLE_NAME_FORENSIC_DATA = "forensicData"
 const val COLUMN_FAMILY_NAME_CONTENT = "content"
 const val COLUMN_FAMILY_NAME_METADATA = "metadata"
 
+fun createRowKey(rowPrefix:String, key:Int):String{
+    val modulo = "%02d".format(key%30)
+    return "${modulo}_${rowPrefix}_$key"
+}
+
 class HbaseDataImport(private val inputDirectory: Path, private val hdfsDataImport: HDFSDataImport,
                       forensicCase: ForensicCase) {
 
@@ -91,14 +96,15 @@ class HbaseDataImport(private val inputDirectory: Path, private val hdfsDataImpo
      */
     private fun createTables() {
         caseManager.createForensicCaseManagementTables()
-        caseManager.createTable(createForensicDataTableDescriptor())
+        caseManager.createTable(createForensicDataTableDescriptor(),true)
     }
 
     private fun createForensicDataTableDescriptor(): HTableDescriptor {
         val table = HTableDescriptor(TableName.valueOf(TABLE_NAME_FORENSIC_DATA))
         table.addFamily(HColumnDescriptor(COLUMN_FAMILY_NAME_METADATA)
                 // Set the replication scope to 1 is very important for replicate data with hbase-indexer to solr!
-                .setCompressionType(Compression.Algorithm.NONE).setScope(1))
+                //FIXME: Temporary disable replication scope
+                .setCompressionType(Compression.Algorithm.NONE))//.setScope(1))
         table.addFamily(HColumnDescriptor(COLUMN_FAMILY_NAME_CONTENT).setCompressionType(Compression.Algorithm.NONE))
         return table
     }
@@ -112,11 +118,12 @@ class HbaseDataImport(private val inputDirectory: Path, private val hdfsDataImpo
         HBaseConnection.connection?.let { connection ->
             logger.trace { "Upload Metadata of file ${inputDirectory.resolve(fileMetadata.relativeFilePath)}" }
             val table = connection.getTable(TableName.valueOf(TABLE_NAME_FORENSIC_DATA))
-            val rowKey = "${rowPrefix}_${rowCount.getAndIncrement()}"
-            table.put(createPuts(fileMetadata, rowKey))
+            val rowKey = createRowKey(rowPrefix,rowCount.getAndIncrement())
+            table.put(createPut(fileMetadata, rowKey))
             table.close()
             if (FileType.DATA_FILE == fileMetadata.fileType && !isSmallFile(fileMetadata)) {
                 // Use row index of hbase entry as file name for raw file content
+                //FIXME: Temporary disable HDFS upload
                 hdfsDataImport.uploadFileIntoHDFS(fileMetadata.relativeFilePath, rowKey)
             }
         }
@@ -125,32 +132,30 @@ class HbaseDataImport(private val inputDirectory: Path, private val hdfsDataImpo
     /**
      * create Put objects to import every metadata into a single column
      */
-    private fun createPuts(fileMetadata: FileMetadata, rowKey: String): List<Put> {
-
-
-        val map = fileMetadata.toMap().map {
-            Put(rowKey.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_METADATA.toByteArray(utf8),
-                    it.key.toByteArray(utf8),
-                    it.value.toByteArray(utf8))
+    private fun createPut(fileMetadata: FileMetadata, rowKey: String): Put {
+        val put = Put(rowKey.toByteArray(utf8))
+        fileMetadata.toMap().map {
+            put.addColumn(COLUMN_FAMILY_NAME_METADATA.toByteArray(utf8),
+                it.key.toByteArray(utf8),
+                it.value.toByteArray(utf8))
         }
-
         if (FileType.DATA_FILE == fileMetadata.fileType) {
-            return if (isSmallFile(fileMetadata)) {
+             if (isSmallFile(fileMetadata)) {
                 fileContentsInHbase.incrementAndGet()
                 val absolutePath = inputDirectory.resolve(fileMetadata.relativeFilePath)
-                map.plus(Put(rowKey.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
+                put.addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
                         "fileContent".toByteArray(utf8),
-                        Files.readAllBytes(absolutePath)))
+                        Files.readAllBytes(absolutePath))
             } else {
                 //It's a large file. Therefore only save a file path in the database column "hdfsFilePath"
                 // Additionally the row index will be used as file name for the raw content in hdfs!
                 fileContentsInHdfs.incrementAndGet()
-                map.plus(Put(rowKey.toByteArray(utf8)).addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
+                put.addColumn(COLUMN_FAMILY_NAME_CONTENT.toByteArray(utf8),
                         "hdfsFilePath".toByteArray(utf8),
-                        hdfsDataImport.getHDFSExhibitDirectory().resolve(rowKey).toString().toByteArray(utf8)))
+                        hdfsDataImport.getHDFSExhibitDirectory().resolve(rowKey).toString().toByteArray(utf8))
             }
         }
-        return map
+        return put
     }
 
     private fun isSmallFile(fileMetadata: FileMetadata): Boolean {

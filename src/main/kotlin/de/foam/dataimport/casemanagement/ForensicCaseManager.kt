@@ -158,7 +158,7 @@ class ForensicCaseManager() {
      * Create the given table on HBASE.
      * Do nothing if the table already exists.
      */
-    fun createTable(table: HTableDescriptor) {
+    fun createTable(table: HTableDescriptor, splitTables:Boolean = false) {
         HBaseConnection.connection?.let { connection ->
             connection.admin.use { admin ->
 
@@ -167,8 +167,16 @@ class ForensicCaseManager() {
                 } else {
                     logger.debug { "Creating table ${table.tableName} in HBASE" }
 
-                    admin.createTable(table)
-                    //FIXME: Use another createTable method to provide a region split!
+                    if (splitTables){
+                        val regions = 0 .. 29
+                        val splitKeys = regions
+                                .map { "%02d".format(it) }
+                                .map { it.toByteArray(Charsets.UTF_8) }
+                                .toTypedArray()
+                        admin.createTable(table,splitKeys)
+                    }else{
+                        admin.createTable(table)
+                    }
                     logger.debug { "Finished creation of table ${table.tableName}" }
                 }
             }
